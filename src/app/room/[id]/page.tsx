@@ -84,7 +84,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
 
     return (
         <div className="flex flex-col md:flex-row h-full min-h-screen bg-gradient-to-br from-gray-900 to-gray-950 transition-colors duration-500">
-            <aside className=" hidden md:flex w-full md:w-48 bg-gray-900/95 p-4 flex-col gap-2 border-r border-gray-800 shadow-lg animate-fade-in">
+            <aside className=" hidden md:flex w-full md:w-40 bg-gray-900/95 p-4 flex-col gap-2 border-r border-gray-800 shadow-lg animate-fade-in">
                 <div className="font-bold mb-4 text-lg flex items-start gap-2 flex-col text-white">
                     <div className="flex items-center gap-2">
                         <Users className="w-5 h-5" /> Users
