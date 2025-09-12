@@ -45,6 +45,8 @@ export async function GET() {
                             },
                         },
                         { $project: { id: 1 } },
+                        // De-duplicate entries by user id (in case of transient duplicates)
+                        { $group: { _id: '$id' } },
                     ],
                     as: 'users',
                 },
@@ -63,7 +65,7 @@ export async function GET() {
                                     $filter: {
                                         input: '$users',
                                         as: 'u',
-                                        cond: { $eq: ['$$u.id', '$ownerId'] },
+                                        cond: { $eq: ['$$u._id', '$ownerId'] },
                                     },
                                 },
                             },

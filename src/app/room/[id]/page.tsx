@@ -21,6 +21,7 @@ interface Message {
 }
 
 import React from "react";
+import Link from "next/link";
 
 interface PollOptionClient { _id: string; text: string; votes: number }
 interface PollClient { _id: string; roomId: string; question: string; options: PollOptionClient[]; active: boolean; createdAt: string; updatedAt: string }
@@ -208,16 +209,26 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
                 </div>
             </aside>
             <main className="flex-1 flex flex-col items-center animate-fade-in overflow-hidden w-full">
-                <Card className="w-full flex flex-col flex-1 h-full max-h-full shadow-2xl border-border rounded-none bg-card gap-0">
+                <Card className="w-full flex flex-col flex-1 py-4 h-full max-h-full shadow-2xl border-border rounded-none bg-card gap-0">
                     <CardHeader>
-                        <CardTitle className="text-xl flex items-center gap-2 text-foreground"><MessageCircle className="w-5 h-5" /> Room: {roomId}</CardTitle>
+
+                        <div className="flex items-center justify-between w-full">
+                            <CardTitle className="text-xl flex items-center gap-2 text-foreground">
+                                <MessageCircle className="w-5 h-5" /> Room: {roomId}
+                            </CardTitle>
+                            <Button asChild variant="secondary">
+                                <Link href="/">Back Home</Link>
+                            </Button>
+                        </div>
+
                         <div className="font-bold md:mb-4 md:hidden text-lg flex items-center gap-2 text-foreground">
                             <Users className="w-5 h-5" /> Users
                             <span className="ml-2 text-sm font-normal text-muted-foreground">({dedupedUsers.length} connected)</span>
                         </div>
+
                     </CardHeader>
                     <CardContent className="flex flex-col px-4 flex-1 min-h-0 overflow-hidden">
-                        <div className="space-y-4 mb-4">
+                        <div className="space-y-4 my-2">
                             {owner === anonId ? (<CreatePoll roomId={roomId} anonId={anonId} />) : null}
                             {polls.map((p) => (
                                 <PollCard

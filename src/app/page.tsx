@@ -181,7 +181,7 @@ export default function Home() {
       </footer>
 
       <style jsx global>{`
-        html { background: #0a0a0a; color-scheme: dark; }
+        html { background: #1b1b1b; color-scheme: dark; }
         .animate-fade-in { animation: fadeIn 0.7s; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
       `}</style>
