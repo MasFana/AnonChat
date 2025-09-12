@@ -25,6 +25,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     // Get current users and room
     const users = await db.collection('users').find({ roomId: id }).toArray();
     const room = await db.collection('rooms').findOne({ _id: new ObjectId(id) });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (!room || users.length === 0 || !users.find((u: any) => u.id === room.ownerId)) {
         // Cleanup: delete room, messages, users
         await db.collection('rooms').deleteOne({ _id: new ObjectId(id) });
