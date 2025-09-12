@@ -98,9 +98,10 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="max-w-6xl mx-auto px-4 py-8 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-primary/80 via-primary to-primary/60 shadow-[0_0_40px_rgba(59,130,246,0.35)]" />
-          <div className="text-xl font-bold tracking-tight">Vibe Rooms</div>
+        <div className="flex items-center">
+          <div className="flex items-center justify-end">
+            <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24"><path fill="#ededed" fill-rule="evenodd" d="M21 11.901V6.43c0-2.269 0-3.404-.707-4.024c-.707-.621-1.788-.434-3.95-.061l-1.055.182c-1.64.283-2.46.425-3.288.425c-.828 0-1.648-.142-3.288-.425l-1.054-.182c-2.162-.373-3.244-.56-3.95.06C3 3.026 3 4.16 3 6.43v5.472c0 5.69 4.239 8.45 6.899 9.622c.721.318 1.082.477 2.101.477c1.02 0 1.38-.159 2.101-.477C16.761 20.351 21 17.59 21 11.901ZM7.17 9.141c.124-.257.587-.607 1.33-.607c.743 0 1.206.35 1.33.606a.738.738 0 0 0 1.005.348a.79.79 0 0 0 .336-1.043C10.712 7.494 9.603 6.98 8.5 6.98c-1.103 0-2.212.515-2.67 1.466a.79.79 0 0 0 .335 1.043a.738.738 0 0 0 1.006-.348Zm8.33-.607c-.743 0-1.206.35-1.33.606a.738.738 0 0 1-1.005.348a.79.79 0 0 1-.336-1.043c.459-.951 1.567-1.466 2.671-1.466c1.104 0 2.212.515 2.67 1.466a.79.79 0 0 1-.335 1.043a.738.738 0 0 1-1.006-.348c-.123-.256-.586-.606-1.329-.606Zm-7.511 6.008a.804.804 0 0 1-.032-1.104a.748.748 0 0 1 1.067-.022l.102.079c.101.071.268.176.507.285c.475.216 1.247.453 2.367.453c1.12 0 1.892-.237 2.367-.453c.239-.109.406-.214.506-.285a1.523 1.523 0 0 0 .117-.091l.001-.001a.731.731 0 0 1 1.052.035a.797.797 0 0 1-.026 1.098l-.001.002h-.001l-.003.004l-.008.007l-.02.019a3.027 3.027 0 0 1-.262.209a4.57 4.57 0 0 1-.751.426c-.663.302-1.64.584-2.971.584c-1.33 0-2.308-.282-2.97-.584a4.569 4.569 0 0 1-.752-.427a3.018 3.018 0 0 1-.288-.233l-.001-.001Z" clip-rule="evenodd" /></svg>          </div>
+          <div className="text-xl font-bold tracking-tight">Anon Chat</div>
         </div>
         <div className="hidden md:flex items-center gap-3">
           <Button onClick={handleCreate} disabled={loading}>
@@ -177,7 +178,7 @@ export default function Home() {
       </main>
 
       <footer className="max-w-6xl mx-auto px-4 py-10 text-center text-muted-foreground text-sm">
-        Built with Next.js · MongoDB · SSE
+        Built with Next.js · MongoDB · SSE ❤️ <a href="https://github.com/MasFana" className="underline hover:text-foreground">MasFana</a>
       </footer>
 
       <style jsx global>{`
