@@ -210,14 +210,13 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
             </aside>
             <main className="flex-1 flex flex-col items-center animate-fade-in overflow-hidden w-full">
                 <Card className="w-full flex flex-col flex-1 py-4 h-full max-h-full shadow-2xl border-border rounded-none bg-card gap-0">
-                    <CardHeader>
-
+                    <CardHeader className="px-4">
                         <div className="flex items-center justify-between w-full">
                             <CardTitle className="text-xl flex items-center gap-2 text-foreground">
-                                <MessageCircle className="w-5 h-5" /> Room: {roomId}
+                                <MessageCircle className="w-5 h-5" /><span className="hidden sm:inline">Room: </span> <span className="text-sm sm:text-xl">{roomId}</span>
                             </CardTitle>
                             <Button asChild variant="secondary">
-                                <Link href="/">Back Home</Link>
+                                <Link href="/">Home</Link>
                             </Button>
                         </div>
 
@@ -247,7 +246,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
                                 />
                             ))}
                         </div>
-                        <div ref={messagesContainerRef} className="flex-1 min-h-0 overflow-y-auto space-y-2 mb-4 pr-2 custom-scrollbar">
+                        <div ref={messagesContainerRef} className="flex-1 min-h-0 overflow-y-auto space-y-2 mb-4 custom-scrollbar">
                             {messages.map((m, i) => {
                                 const isMine = m.userId === anonId;
                                 const isLast = i === messages.length - 1;
@@ -445,9 +444,23 @@ function PollCard({ poll, roomId, anonId, isOwner, myVotes, optimisticPatch, opt
                     return (
                         <div key={o._id} className="relative overflow-hidden rounded border border-border">
                             <div className="absolute inset-0 pointer-events-none" aria-hidden>
-                                <div className={(selected ? "bg-primary/40" : "bg-muted/40") + " h-full transition-all"} style={{ width: `${pct}%` }} />
+                                <div
+                                    className={
+                                        (selected ? "bg-primary/40" : "bg-muted/70") +
+                                        " h-full transition-all"
+                                    }
+                                    style={{ width: `${pct}%` }}
+                                />
                             </div>
-                            <Button onClick={() => vote(o._id)} disabled={busy || !poll.active} variant="ghost" className={"relative z-10 w-full justify-between " + (selected ? "font-semibold" : "")}>
+                            <Button
+                                onClick={() => vote(o._id)}
+                                disabled={busy || !poll.active}
+                                variant="ghost"
+                                className={
+                                    "relative rounded-none z-10 w-full justify-between " +
+                                    (selected ? "font-semibold" : "")
+                                }
+                            >
                                 <span>{o.text}</span>
                                 <span className="ml-4">{pct}% • {o.votes}</span>
                             </Button>
