@@ -34,25 +34,35 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     const { id: roomId } = React.use(params);
     const anonId = typeof window !== "undefined" ? localStorage.getItem("anonId") : null;
 
-    // Polling logic
+    // Join room if not already joined, then start polling
     useEffect(() => {
         if (!anonId) {
             router.replace("/?msg=missing-id");
             return;
         }
-        const poll = async () => {
-            const res = await fetch(`/api/room/${roomId}/state?anonId=${anonId}`);
-            const data = await res.json();
-            if (data.deleted) {
-                router.replace("/?msg=Room closed");
-                return;
-            }
-            setUsers(data.users);
-            setMessages(data.messages);
-            setOwner(data.owner);
+        // Join the room (idempotent)
+        const joinRoom = async () => {
+            await fetch(`/api/room/${roomId}/join`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ anonId }),
+            });
         };
-        poll();
-        pollingRef.current = setInterval(poll, 2000);
+        joinRoom().then(() => {
+            const poll = async () => {
+                const res = await fetch(`/api/room/${roomId}/state?anonId=${anonId}`);
+                const data = await res.json();
+                if (data.deleted) {
+                    router.replace("/?msg=Room closed");
+                    return;
+                }
+                setUsers(data.users);
+                setMessages(data.messages);
+                setOwner(data.owner);
+            };
+            poll();
+            pollingRef.current = setInterval(poll, 2000);
+        });
         return () => {
             if (pollingRef.current) clearInterval(pollingRef.current);
         };
@@ -75,12 +85,15 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     return (
         <div className="flex flex-col md:flex-row h-full min-h-screen bg-gradient-to-br from-gray-900 to-gray-950 transition-colors duration-500">
             <aside className="w-full md:w-64 bg-gray-900/95 p-4 flex flex-col gap-2 border-r border-gray-800 shadow-lg animate-fade-in">
-                <div className="font-bold mb-4 text-lg flex items-center gap-2 text-white"><Users className="w-5 h-5" /> Users</div>
+                <div className="font-bold mb-4 text-lg flex items-center gap-2 text-white">
+                    <Users className="w-5 h-5" /> Users
+                    <span className="ml-2 text-sm font-normal text-gray-400">({users.length} connected)</span>
+                </div>
                 <div className="flex flex-col gap-1 overflow-y-auto">
                     {users.map((u) => (
-                        <div key={u.id} className={u.id === owner ? "font-bold text-primary flex items-center gap-1 text-yellow-400" : "flex items-center gap-1 text-gray-200"}>
+                        <div key={u.id} className={u.id === owner ? "font-bold text-primary flex items-center gap-1" : "flex items-center gap-1 text-gray-200"}>
                             {u.id === owner ? <span title="Owner">👑</span> : null}
-                            <span className="truncate">{u.id}</span>
+                            <span className="truncate text-gray-400">{u.id}</span>
                         </div>
                     ))}
                 </div>
