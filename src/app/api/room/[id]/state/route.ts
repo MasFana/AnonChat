@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
+import { roomEventBus } from '@/lib/events';
 
 // GET /api/room/[id]/state
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -31,6 +32,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         await db.collection('rooms').deleteOne({ _id: new ObjectId(id) });
         await db.collection('messages').deleteMany({ roomId: id });
         await db.collection('users').deleteMany({ roomId: id });
+        await db.collection('polls').deleteMany({ roomId: id });
+        await db.collection('votes').deleteMany({ roomId: id });
+        roomEventBus.publish(id, { type: 'room-deleted', payload: { roomId: id } });
         return NextResponse.json({ deleted: true });
     }
     const messages = await db.collection('messages').find({ roomId: id }).sort({ createdAt: 1 }).toArray();

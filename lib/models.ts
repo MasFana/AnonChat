@@ -20,3 +20,19 @@ export interface Message {
     content: string;
     createdAt: Date;
 }
+
+export interface PollOption {
+    id: string; // ObjectId as string
+    text: string;
+    votes: number;
+}
+
+export interface Poll {
+    id: string; // poll id (ObjectId as string)
+    roomId: string;
+    question: string;
+    options: PollOption[];
+    active: boolean; // if false, voting disabled
+    createdAt: Date;
+    updatedAt: Date;
+}

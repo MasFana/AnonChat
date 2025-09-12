@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
+import { roomEventBus } from '@/lib/events';
 
 // POST /api/room/[id]/join → join existing room with random anonymous ID
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -19,6 +20,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             lastSeen: new Date(),
             connectedAt: new Date(),
         });
+        const users = await db.collection('users').find({ roomId: id }).toArray();
+        roomEventBus.publish(id, { type: 'users', payload: users });
     }
     return NextResponse.json({ joined: true });
 }

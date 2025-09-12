@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
+import { roomEventBus } from '@/lib/events';
 
 // POST /api/room/[id]/message → send a chat message
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -14,11 +15,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         const room = await db.collection('rooms').findOne({ _id: new ObjectId(id) });
         if (!room) return NextResponse.json({ error: 'Room not found' }, { status: 404 });
     }
-    await db.collection('messages').insertOne({
+    const msg = {
         roomId: id,
         userId: anonId,
         content,
         createdAt: new Date(),
-    });
-    return NextResponse.json({ sent: true });
+    };
+    const insertRes = await db.collection('messages').insertOne(msg);
+    const out = { ...msg, id: insertRes.insertedId.toString() };
+    roomEventBus.publish(id, { type: 'message', payload: out });
+    return NextResponse.json({ sent: true, id: out.id });
 }
