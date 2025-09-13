@@ -1,0 +1,16 @@
+{
+  "name": "Anon Chat",
+  "short_name": "AnonChat",
+  "description": "Real‑time anonymous chat rooms with live polls.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f0f0f",
+  "theme_color": "#0f0f0f",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ]
+}
