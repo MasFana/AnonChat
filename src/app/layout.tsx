@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -54,12 +54,14 @@ export const metadata: Metadata = {
   category: 'communication',
   applicationName: 'Anon Chat',
   generator: 'Next.js',
-  viewport: {
-    width: 'device-width',
-    initialScale: 1,
-    viewportFit: 'cover'
-  },
   manifest: '/manifest.webmanifest'
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#0f0f0f'
 };
 
 export default function RootLayout({
