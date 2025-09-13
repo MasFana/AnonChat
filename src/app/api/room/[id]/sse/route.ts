@@ -27,9 +27,16 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     const stream = new ReadableStream<Uint8Array>({
         start: async (controller) => {
             const encoder = new TextEncoder();
+            let closed = false;
 
             const send = (e: { type: string; payload?: unknown }) => {
-                controller.enqueue(encoder.encode(toSSE(e)));
+                if (closed) return; // stream already closed
+                try {
+                    controller.enqueue(encoder.encode(toSSE(e)));
+                } catch {
+                    // controller already closed or errored; mark closed to stop future sends
+                    closed = true;
+                }
             };
 
             // Subscribe to room events
@@ -112,16 +119,15 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
                     const hasOwner = room ? users.some((u) => u.id === room.ownerId) : false;
                     // Delete immediately only if room missing or no users remain
                     if (!room || users.length === 0) {
-                        // Cancel any pending owner-leave timer
                         const existingTimer = timers.get(roomId);
                         if (existingTimer) { clearTimeout(existingTimer); timers.delete(roomId); }
-                        // Cleanup room and notify
                         await db.collection('rooms').deleteOne({ _id: new ObjectId(roomId) });
                         await db.collection('messages').deleteMany({ roomId });
                         await db.collection('users').deleteMany({ roomId });
                         await db.collection('polls').deleteMany({ roomId });
                         await db.collection('votes').deleteMany({ roomId });
                         roomEventBus.publish(roomId, { type: 'room-deleted', payload: { roomId } });
+                        shutdown();
                         return;
                     }
 
@@ -137,6 +143,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
                             await db.collection('polls').deleteMany({ roomId });
                             await db.collection('votes').deleteMany({ roomId });
                             roomEventBus.publish(roomId, { type: 'room-deleted', payload: { roomId } });
+                            shutdown();
                             return;
                         }
                         if (!timers.has(roomId)) {
@@ -176,56 +183,42 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
             }, 5000);
 
             // Cleanup on close
-            const cancel = () => {
+            const shutdown = () => {
+                if (closed) return; // idempotent
+                closed = true;
                 clearInterval(heartbeat);
                 clearInterval(presence);
                 unsubscribe();
-                // Best-effort immediate cleanup when a client (possibly last user / owner) disconnects.
+                try { controller.close(); } catch { }
+            };
+
+            const cancel = () => {
+                // Remove this user then decide if room deletion required
                 (async () => {
                     try {
                         const db = await connectToDatabase();
-                        // Remove this user record immediately (so last user leaving triggers emptiness)
                         await db.collection('users').deleteOne({ id: anonId, roomId });
-                        // Prune any clearly stale users too (safety)
                         const tenSecondsAgo = new Date(Date.now() - 10000);
                         await db.collection('users').deleteMany({ roomId, lastSeen: { $lt: tenSecondsAgo } });
-                        // Re-check remaining users & room
                         const usersLeft = await db.collection('users').find({ roomId }).toArray();
                         const room = await db.collection('rooms').findOne({ _id: new ObjectId(roomId) });
-                        if (!room) {
-                            return; // already gone
-                        }
+                        if (!room) { shutdown(); return; }
                         if (usersLeft.length === 0) {
-                            // Schedule grace-period deletion instead of immediate, so reload by owner doesn't nuke room.
-                            const existingTimer = timers.get(roomId);
-                            if (!existingTimer) {
-                                const t = setTimeout(async () => {
-                                    try {
-                                        const db2 = await connectToDatabase();
-                                        const stillUsers = await db2.collection('users').find({ roomId }).toArray();
-                                        const stillRoom = await db2.collection('rooms').findOne({ _id: new ObjectId(roomId) });
-                                        if (!stillRoom || stillUsers.length === 0) {
-                                            await db2.collection('rooms').deleteOne({ _id: new ObjectId(roomId) });
-                                            await db2.collection('messages').deleteMany({ roomId });
-                                            await db2.collection('polls').deleteMany({ roomId });
-                                            await db2.collection('votes').deleteMany({ roomId });
-                                            await db2.collection('users').deleteMany({ roomId });
-                                            roomEventBus.publish(roomId, { type: 'room-deleted', payload: { roomId } });
-                                        }
-                                    } finally {
-                                        timers.delete(roomId);
-                                    }
-                                }, GRACE_MS);
-                                timers.set(roomId, t);
-                            }
+                            await db.collection('rooms').deleteOne({ _id: new ObjectId(roomId) });
+                            await db.collection('messages').deleteMany({ roomId });
+                            await db.collection('polls').deleteMany({ roomId });
+                            await db.collection('votes').deleteMany({ roomId });
+                            await db.collection('users').deleteMany({ roomId });
+                            roomEventBus.publish(roomId, { type: 'room-deleted', payload: { roomId } });
                         } else {
                             roomEventBus.publish(roomId, { type: 'users', payload: usersLeft });
                         }
                     } catch {
-                        // ignore disconnect cleanup errors
+                        // ignore
+                    } finally {
+                        shutdown();
                     }
                 })();
-                try { controller.close(); } catch { }
             };
 
             // If client disconnects
