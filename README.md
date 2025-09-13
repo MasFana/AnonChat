@@ -137,7 +137,14 @@ OWNER_AWAY_GRACE_MS=5000   # (optional) grace period before deleting room when o
 
 ## 📸 Screenshots (optional)
 
-*(You can add screenshots of the homepage and chat room here)*
+### Dashboard
+![AnonChat Dashboard showing room creation and list of active rooms](./homepage.png)
+
+### Room (Owner)
+![Room view as owner with poll creation controls and participant list](./owner.png)
+
+### Room (Client)
+![Participant view with live messages, active poll, and presence indicators](./client.png)
 
 ---
 

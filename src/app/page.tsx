@@ -222,7 +222,7 @@ export default function Home() {
                 <div className="col-span-full text-center text-muted-foreground">Loading rooms…</div>
               )}
               {rooms.length === 0 && !roomsLoading && (
-                <div className="col-span-full text-center muted-foreground">No rooms yet. Be the first — create one above.</div>
+                <div className="col-span-full text-center muted-foreground">No rooms yet. Be the first to create one above.</div>
               )}
             </div>
           </section>
