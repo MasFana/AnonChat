@@ -99,7 +99,7 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col justify-between">
+    <div className="min-h-screen bg-gradient-to-b from-neutral-900 to-neutral-950 text-foreground flex flex-col justify-between">
       <div>
 
         <header className="max-w-6xl mx-auto px-4 py-8 flex items-center justify-between">
@@ -198,12 +198,7 @@ export default function Home() {
               <Button variant="secondary" onClick={loadRooms} disabled={roomsLoading} className="hover:shadow">{roomsLoading ? 'Refreshing…' : 'Refresh'}</Button>
             </div>
             <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
-              {roomsLoading && (
-                <div className="col-span-full text-muted-foreground">Loading rooms…</div>
-              )}
-              {rooms.length === 0 && !roomsLoading && (
-                <div className="col-span-full text-muted-foreground">No rooms yet. Be the first — create one above.</div>
-              )}
+
               {rooms.map((r) => (
                 <button key={r.id} onClick={() => router.push(`/room/${r.id}`)} className="text-left group">
                   <div className="rounded-xl border border-border/60 bg-card/70 p-4 hover:border-border/90 hover:bg-card transition-all shadow-[0_5px_25px_-5px_rgba(0,0,0,0.5)] hover:shadow-[0_10px_35px_-5px_rgba(0,0,0,0.6)]">
@@ -223,6 +218,12 @@ export default function Home() {
                   </div>
                 </button>
               ))}
+              {roomsLoading && (
+                <div className="col-span-full text-center text-muted-foreground">Loading rooms…</div>
+              )}
+              {rooms.length === 0 && !roomsLoading && (
+                <div className="col-span-full text-center muted-foreground">No rooms yet. Be the first — create one above.</div>
+              )}
             </div>
           </section>
         </main>

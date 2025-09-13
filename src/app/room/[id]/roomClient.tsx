@@ -233,9 +233,17 @@ function PollCard({ poll, roomId, anonId, isOwner, myVotes, optimisticPatch, opt
       if (res.ok) {
         const data = await res.json().catch(() => null); if (data?.unchanged) { if (previous !== poll.active) optimisticPatch(poll._id, { active: previous }); }
       } else {
-        let err: any = null; try { err = await res.json(); } catch { }
-        const code = err?.errorCode; const benign = code === 'updateReturnedNull' || code === 'pollByIdOrRoomNotFound';
-        if (!benign) { optimisticPatch(poll._id, { active: previous }); console.error('Toggle failed', res.status, err); if (typeof window !== 'undefined') alert(`Toggle failed (${res.status}): ${code || err?.error || 'Unknown error'}`); }
+        let err: unknown = null; try { err = await res.json(); } catch { }
+        const code = (err as { errorCode?: string; error?: string } | null | undefined)?.errorCode;
+        const benign = code === 'updateReturnedNull' || code === 'pollByIdOrRoomNotFound';
+        if (!benign) {
+          optimisticPatch(poll._id, { active: previous });
+          console.error('Toggle failed', res.status, err);
+          if (typeof window !== 'undefined') {
+            const msg = code || (err as { error?: string } | null | undefined)?.error || 'Unknown error';
+            alert(`Toggle failed (${res.status}): ${msg}`);
+          }
+        }
       }
     } finally { setBusy(false); }
   };
@@ -246,9 +254,17 @@ function PollCard({ poll, roomId, anonId, isOwner, myVotes, optimisticPatch, opt
       setBusy(true);
       const res = await fetch(`/api/room/${roomId}/poll/${poll._id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ anonId }) });
       if (!res.ok) {
-        let err: any = null; try { err = await res.json(); } catch { }
-        const code = err?.errorCode; const benign = code === 'pollByIdOrRoomNotFound' || code === 'deleteReturnedNull';
-        if (!benign) { optimisticPatch(backup._id, backup); console.error('Delete failed', res.status, err); if (typeof window !== 'undefined') alert(`Delete failed (${res.status}): ${code || err?.error || 'Unknown error'}`); }
+        let err: unknown = null; try { err = await res.json(); } catch { }
+        const code = (err as { errorCode?: string; error?: string } | null | undefined)?.errorCode;
+        const benign = code === 'pollByIdOrRoomNotFound' || code === 'deleteReturnedNull';
+        if (!benign) {
+          optimisticPatch(backup._id, backup);
+          console.error('Delete failed', res.status, err);
+          if (typeof window !== 'undefined') {
+            const msg = code || (err as { error?: string } | null | undefined)?.error || 'Unknown error';
+            alert(`Delete failed (${res.status}): ${msg}`);
+          }
+        }
       }
     } finally { setBusy(false); }
   };
@@ -256,31 +272,53 @@ function PollCard({ poll, roomId, anonId, isOwner, myVotes, optimisticPatch, opt
   const totalVotes = poll.options.reduce((sum, o) => sum + (o.votes || 0), 0) || 0;
 
   return (
-    <div className="bg-card p-3 rounded border border-border">
-      <div className="flex items-center justify-between">
-        <div className="font-semibold text-foreground">{poll.question}</div>
-        <div className="text-xs text-muted-foreground">{poll.active ? 'Open' : 'Closed'}</div>
+    <div className="p-4 rounded-lg border border-border bg-card/60 backdrop-blur-sm shadow-sm hover:bg-card/80 transition-colors">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="font-semibold leading-snug text-foreground break-words text-sm sm:text-base">{poll.question}</div>
+          <div className="mt-1 text-[11px] sm:text-xs text-muted-foreground">Total votes: {totalVotes}</div>
+        </div>
+        <span className={'shrink-0 px-2 py-1 rounded-full text-[10px] font-medium border tracking-wide ' + (poll.active ? 'bg-green-500/15 text-green-400 border-green-500/30' : 'bg-red-500/15 text-red-400 border-red-500/30')}>
+          {poll.active ? 'OPEN' : 'CLOSED'}
+        </span>
       </div>
-      <div className="mt-2 grid gap-2">
+      <div className="mt-3 grid gap-2">
         {poll.options.map(o => {
           const selected = myVotes[poll._id] === o._id; const pct = totalVotes > 0 ? Math.round((o.votes * 100) / totalVotes) : 0;
           return (
-            <div key={o._id} className="relative overflow-hidden rounded border border-border">
+            <div
+              key={o._id}
+              className={'group relative overflow-hidden rounded-md border bg-gradient-to-br from-background/40 to-background/10 ' + (selected ? 'border-primary/70 ring-1 ring-primary/40' : 'border-border hover:border-primary/40')}
+            >
               <div className="absolute inset-0 pointer-events-none" aria-hidden>
-                <div className={(selected ? 'bg-primary/40' : 'bg-muted/70') + ' h-full transition-all'} style={{ width: `${pct}%` }} />
+                <div
+                  className={(selected ? 'bg-primary/40' : 'bg-muted/60 dark:bg-muted/40') + ' h-full transition-all duration-500 ease-out backdrop-blur-[1px]'}
+                  style={{ width: `${pct}%` }}
+                />
               </div>
-              <Button onClick={() => vote(o._id)} disabled={busy || !poll.active} variant="ghost" className={'relative rounded-none z-10 w-full justify-between ' + (selected ? 'font-semibold' : '')}>
-                <span>{o.text}</span>
-                <span className="ml-4">{pct}% • {o.votes}</span>
+              <Button
+                onClick={() => vote(o._id)}
+                disabled={busy || !poll.active}
+                variant="ghost"
+                aria-pressed={selected}
+                className={'relative rounded-none z-10 w-full justify-between text-left px-3 py-2 font-medium text-foreground/90 hover:text-foreground ' + (selected ? 'font-semibold' : '')}
+                title={selected ? 'You voted this option' : 'Vote this option'}
+              >
+                <span className="flex-1 pr-4 truncate">{o.text}</span>
+                <span className="ml-auto shrink-0 tabular-nums text-xs text-muted-foreground group-hover:text-foreground/80">
+                  {pct}% • {o.votes}
+                </span>
               </Button>
             </div>
           );
         })}
       </div>
       {isOwner && (
-        <div className="flex gap-2 mt-2">
-          <Button onClick={toggle} disabled={busy}>{poll.active ? 'Close' : 'Open'}</Button>
-          <Button onClick={del} disabled={busy} variant="destructive">Delete</Button>
+        <div className="flex flex-wrap gap-2 mt-3">
+          <Button onClick={toggle} disabled={busy} size="sm" variant={poll.active ? 'secondary' : 'default'}>
+            {poll.active ? 'Close Poll' : 'Reopen'}
+          </Button>
+          <Button onClick={del} disabled={busy} variant="destructive" size="sm">Delete</Button>
         </div>
       )}
     </div>
