@@ -179,6 +179,34 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
                 clearInterval(heartbeat);
                 clearInterval(presence);
                 unsubscribe();
+                // Best-effort immediate cleanup when a client (possibly last user / owner) disconnects.
+                (async () => {
+                    try {
+                        const db = await connectToDatabase();
+                        // Remove this user record immediately (so last user leaving triggers emptiness)
+                        await db.collection('users').deleteOne({ id: anonId, roomId });
+                        // Prune any clearly stale users too (safety)
+                        const tenSecondsAgo = new Date(Date.now() - 10000);
+                        await db.collection('users').deleteMany({ roomId, lastSeen: { $lt: tenSecondsAgo } });
+                        // Re-check remaining users & room
+                        const users = await db.collection('users').find({ roomId }).toArray();
+                        const room = await db.collection('rooms').findOne({ _id: new ObjectId(roomId) });
+                        if (!room || users.length === 0) {
+                            // Delete entire room cascade if now empty
+                            await db.collection('rooms').deleteOne({ _id: new ObjectId(roomId) });
+                            await db.collection('messages').deleteMany({ roomId });
+                            await db.collection('polls').deleteMany({ roomId });
+                            await db.collection('votes').deleteMany({ roomId });
+                            await db.collection('users').deleteMany({ roomId }); // idempotent cleanup
+                            roomEventBus.publish(roomId, { type: 'room-deleted', payload: { roomId } });
+                        } else {
+                            // Otherwise broadcast updated users list (dedup best-effort)
+                            roomEventBus.publish(roomId, { type: 'users', payload: users });
+                        }
+                    } catch {
+                        // ignore disconnect cleanup errors
+                    }
+                })();
                 try { controller.close(); } catch { }
             };
 
