@@ -4,6 +4,8 @@ export interface Room {
     id: string; // room id (ObjectId as string)
     ownerId: string; // user id of owner
     createdAt: Date;
+    // Whether the room is publicly listed; legacy rooms may not have this set (defaults to hidden unless migrated)
+    isPublic?: boolean;
 }
 
 export interface User {

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 function randomAnonId() { return "anon-" + Math.random().toString(36).slice(2, 8); }
 
 type RoomListItem = { id: string; createdAt: string; userCount: number; hasOwner: boolean };
+type RoomsStats = { totalRooms: number; activeUsers: number; ownersOnline: number };
 
 export default function HomeClient({ initialMsg }: { initialMsg: string | null }) {
     const router = useRouter();
@@ -15,6 +16,7 @@ export default function HomeClient({ initialMsg }: { initialMsg: string | null }
     const [loading, setLoading] = useState(false);
     const [rooms, setRooms] = useState<RoomListItem[]>([]);
     const [roomsLoading, setRoomsLoading] = useState(false);
+    const [stats, setStats] = useState<RoomsStats | null>(null);
     const [msg, setMsg] = useState(initialMsg || "");
 
     useEffect(() => {
@@ -35,6 +37,7 @@ export default function HomeClient({ initialMsg }: { initialMsg: string | null }
                 hasOwner: r.hasOwner,
             }));
             setRooms(list);
+            if (data.stats && typeof data.stats === 'object') setStats(data.stats as RoomsStats);
         } catch (e) { console.error('Failed to load rooms', e); } finally { setRoomsLoading(false); }
     };
     useEffect(() => { loadRooms(); const t = setInterval(loadRooms, 10000); return () => clearInterval(t); }, []);
@@ -94,12 +97,12 @@ export default function HomeClient({ initialMsg }: { initialMsg: string | null }
                                 </div>
                                 <div className="text-xs text-muted-foreground">Anonymous ID lives only in this browser. Refresh to regenerate.</div>
                             </div>
-                            <HeroStats rooms={rooms} />
+                            <HeroStats rooms={rooms} stats={stats} />
                         </div>
                     </section>
                     <section className="max-w-6xl mx-auto px-4 pb-24" aria-labelledby="rooms-heading">
                         <div className="flex items-center justify-between mb-4">
-                            <h2 id="rooms-heading" className="text-2xl font-semibold tracking-tight">Active Rooms</h2>
+                            <h2 id="rooms-heading" className="text-2xl font-semibold tracking-tight">Public Rooms</h2>
                             <Button variant="secondary" onClick={loadRooms} disabled={roomsLoading} className="hover:shadow">{roomsLoading ? 'Refreshing…' : 'Refresh'}</Button>
                         </div>
                         <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
@@ -130,13 +133,18 @@ export default function HomeClient({ initialMsg }: { initialMsg: string | null }
     );
 }
 
-function HeroStats({ rooms }: { rooms: RoomListItem[] }) {
-    const totalUsers = rooms.reduce((a, r) => a + (r.userCount || 0), 0);
+function HeroStats({ rooms, stats }: { rooms: RoomListItem[]; stats: RoomsStats | null }) {
+    // Fallback to public counts if global stats missing (should rarely happen)
+    const fallbackUsers = rooms.reduce((a, r) => a + (r.userCount || 0), 0);
+    const fallbackOwnersOnline = rooms.filter(r => r.hasOwner).length;
+    const totalRooms = stats ? stats.totalRooms : rooms.length;
+    const totalUsers = stats ? stats.activeUsers : fallbackUsers;
+    const ownersOnline = stats ? stats.ownersOnline : fallbackOwnersOnline;
     return (
-        <div className="flex flex-wrap justify-center gap-4 pt-6">
-            <Stat number={rooms.length} label="Active Rooms" />
-            <Stat number={totalUsers} label="Participants" />
-            <Stat number={rooms.filter(r => r.hasOwner).length} label="Owners Online" />
+        <div className="flex flex-wrap justify-center gap-4 pt-6" aria-label="Platform statistics">
+            <Stat number={totalRooms} label="Rooms" />
+            <Stat number={totalUsers} label="Users" />
+            <Stat number={ownersOnline} label="Owners" />
         </div>
     );
 }

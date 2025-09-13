@@ -18,6 +18,10 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [owner, setOwner] = useState<string>('');
   const [polls, setPolls] = useState<PollClient[]>([]);
+  const [isPublic, setIsPublic] = useState(false);
+  const pendingVisibilityRef = useRef<null | boolean>(null); // track an in-flight optimistic toggle
+  const [visibilityBusy, setVisibilityBusy] = useState(false);
+  const [metaLoading, setMetaLoading] = useState(true);
   const lastVersionRef = useRef(0);
   const [content, setContent] = useState('');
   const [myVotes, setMyVotes] = useState<Record<string, string>>({});
@@ -40,8 +44,29 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   useEffect(() => {
     if (!anonId) { router.replace('/?msg=missing-id'); return; }
     let cancelled = false; let reconcileInterval: NodeJS.Timeout | null = null;
-    const joinAndSubscribe = async () => {
-      await fetch(`/api/room/${roomId}/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ anonId }) });
+    const loadMetaAndConnect = async () => {
+      try {
+        // 1. Fetch lightweight meta first
+        const metaRes = await fetch(`/api/room/${roomId}/meta`, { cache: 'no-store' });
+        if (!metaRes.ok) {
+          if (metaRes.status === 404) { router.replace('/?msg=Room%20not%20found'); return; }
+        } else {
+          const meta = await metaRes.json().catch(() => null);
+          if (meta && meta.ownerId) setOwner(meta.ownerId);
+          if (meta && typeof meta.isPublic === 'boolean') setIsPublic(meta.isPublic);
+        }
+      } finally {
+        setMetaLoading(false);
+      }
+      if (cancelled) return;
+      // 2. Join (presence)
+      try {
+        const res = await fetch(`/api/room/${roomId}/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ anonId }) });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          if (data && typeof data.ownerId === 'string') setOwner(data.ownerId);
+        }
+      } catch { }
       if (cancelled) return;
       if (sseRef.current) { try { sseRef.current.close(); } catch { } sseRef.current = null; }
       const es = new EventSource(`/api/room/${roomId}/sse?anonId=${anonId}`); sseRef.current = es;
@@ -56,10 +81,15 @@ export default function RoomClient({ roomId }: { roomId: string }) {
       es.addEventListener('snapshot', (ev: MessageEvent) => {
         const { payload } = JSON.parse(ev.data);
         setUsers(payload.users); setMessages(payload.messages); setOwner(payload.owner); setMyVotes(payload.myVotes || {});
+        // If we have an optimistic pending visibility change, prefer that until an explicit room-visibility event arrives
+        if (pendingVisibilityRef.current === null) {
+          setIsPublic(!!payload.isPublic);
+        }
         const unique = (payload.polls || []).reduce((acc: Record<string, PollClient>, p: PollClient) => { acc[p._id] = p; return acc; }, {});
         setPolls(Object.values(unique));
         if (typeof payload.pollsVersion === 'number') lastVersionRef.current = payload.pollsVersion;
       });
+      es.addEventListener('room-visibility', (ev: MessageEvent) => { try { const { payload } = JSON.parse(ev.data); if (payload?.roomId === roomId && typeof payload.isPublic === 'boolean') { setIsPublic(payload.isPublic); pendingVisibilityRef.current = null; setVisibilityBusy(false); } } catch { } });
       es.addEventListener('users', (ev: MessageEvent) => { const { payload } = JSON.parse(ev.data); setUsers(payload); });
       es.addEventListener('message', (ev: MessageEvent) => { const { payload } = JSON.parse(ev.data); setMessages(prev => [...prev, payload]); });
       es.addEventListener('poll-created', (ev: MessageEvent) => { const { payload } = JSON.parse(ev.data); upsertPolls(payload); });
@@ -88,7 +118,7 @@ export default function RoomClient({ roomId }: { roomId: string }) {
         if (cancelled) return; try { const res = await fetch(`/api/room/${roomId}/poll`); if (res.ok) { const json = await res.json(); const list: PollClient[] = Array.isArray(json?.polls) ? json.polls : []; if (list.length) setPolls(list); } } catch { }
       }, 60000);
     };
-    joinAndSubscribe();
+    loadMetaAndConnect();
     return () => { cancelled = true; if (reconcileInterval) clearInterval(reconcileInterval); if (sseRef.current) { try { sseRef.current.close(); } catch { } sseRef.current = null; } };
   }, [roomId, anonId, router]);
 
@@ -119,9 +149,73 @@ export default function RoomClient({ roomId }: { roomId: string }) {
           <CardHeader className="px-4">
             <div className="flex items-center justify-between w-full">
               <CardTitle className="text-xl flex items-center gap-2 text-foreground">
-                <MessageCircle className="w-5 h-5" /><span className="hidden sm:inline">Room: </span> <span className="text-sm sm:text-xl">{roomId}</span>
+                <MessageCircle className="w-5 h-5" />
+                <span className="hidden sm:inline">Room: </span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(roomId);
+                      const btn = document.getElementById('room-id-copy');
+                      if (btn) {
+                        btn.dataset.copied = 'true';
+                        setTimeout(() => { delete btn.dataset.copied; }, 1600);
+                      }
+                    } catch { /* ignore */ }
+                  }}
+                  id="room-id-copy"
+                  className="relative group text-sm sm:text-xl font-mono px-2 py-1 rounded hover:bg-accent/40 border border-transparent hover:border-accent/40 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  title="Click to copy room ID"
+                >
+                  <span className="pr-4 select-all">{roomId}</span>
+                  <span className="pointer-events-none absolute top-0 right-0 -translate-y-full mt-[-2px] opacity-0 group-data-[copied=true]:opacity-100 group-data-[copied=true]:translate-y-0 text-[10px] tracking-wide text-emerald-300 transition-all duration-300">Copied!</span>
+                </button>
               </CardTitle>
-              <Button asChild variant="secondary"><Link href="/">Home</Link></Button>
+              <div className="flex items-center gap-2">
+                {metaLoading ? (
+                  <span className="text-[11px] px-3 py-1 rounded-full border border-border/50 text-muted-foreground flex items-center gap-1">
+                    <span className="h-3 w-3 animate-spin border-2 border-border border-t-transparent rounded-full" />
+                    Loading…
+                  </span>
+                ) : owner === anonId ? (
+                  <Button
+                    variant={isPublic ? 'secondary' : 'default'}
+                    size="sm"
+                    onClick={async () => {
+                      if (visibilityBusy) return; // debounce rapid clicks
+                      setVisibilityBusy(true);
+                      const target = !isPublic;
+                      pendingVisibilityRef.current = target;
+                      setIsPublic(target); // optimistic
+                      try {
+                        const res = await fetch(`/api/room/${roomId}/visibility`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ anonId, isPublic: target }) });
+                        if (!res.ok) { // revert if server rejected
+                          pendingVisibilityRef.current = null;
+                          setIsPublic(!target);
+                          setVisibilityBusy(false);
+                        } else {
+                          // Wait for SSE event to clear busy state; fallback timeout just in case
+                          setTimeout(() => { if (pendingVisibilityRef.current !== null) { setVisibilityBusy(false); pendingVisibilityRef.current = null; } }, 4000);
+                        }
+                      } catch {
+                        pendingVisibilityRef.current = null;
+                        setIsPublic(!target);
+                        setVisibilityBusy(false);
+                      }
+                    }}
+                    disabled={metaLoading || visibilityBusy}
+                    title={isPublic ? 'Make room hidden' : 'Make room public'}
+                  >{isPublic ? 'Public' : 'Hidden'}</Button>
+                ) : (
+                  <span
+                    className={'text-[11px] px-2 py-1 rounded-full border font-medium tracking-wide ' + (isPublic
+                      ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                      : 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30')}
+                    title={isPublic ? 'This room is publicly listed' : 'This room is hidden (private)'}
+                  >{isPublic ? 'Public' : 'Hidden'}</span>
+                )}
+                <Button asChild variant="secondary"><Link href="/">Home</Link></Button>
+              </div>
             </div>
             <div className="font-bold md:mb-4 md:hidden text-lg flex items-center gap-2 text-foreground">
               <Users className="w-5 h-5" /> Users <span className="ml-2 text-sm font-normal text-muted-foreground">({dedupedUsers.length} connected)</span>

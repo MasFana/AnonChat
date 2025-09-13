@@ -16,8 +16,8 @@ function toSSE(event: { type: string; payload?: unknown }) {
     return `event: ${event.type}\ndata: ${data}\n\n`;
 }
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    const { id: roomId } = await params;
+export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+    const { id: roomId } = await ctx.params; // await per Next.js dynamic route guidance
     const url = new URL(req.url);
     const anonId = url.searchParams.get('anonId');
     if (!anonId) {
@@ -73,7 +73,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
                     }, {});
                     const pollsVersion = getPollsVersion(roomId);
                     const ownerId = (room as { ownerId?: string } | null)?.ownerId;
-                    send({ type: 'snapshot', payload: { users, messages, owner: ownerId, polls, myVotes, pollsVersion } });
+                    const isPublic = (room as { isPublic?: boolean } | null)?.isPublic ?? false;
+                    send({ type: 'snapshot', payload: { users, messages, owner: ownerId, polls, myVotes, pollsVersion, isPublic } });
                 }
             } catch {
                 // ignore snapshot errors
@@ -189,19 +190,36 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
                         const tenSecondsAgo = new Date(Date.now() - 10000);
                         await db.collection('users').deleteMany({ roomId, lastSeen: { $lt: tenSecondsAgo } });
                         // Re-check remaining users & room
-                        const users = await db.collection('users').find({ roomId }).toArray();
+                        const usersLeft = await db.collection('users').find({ roomId }).toArray();
                         const room = await db.collection('rooms').findOne({ _id: new ObjectId(roomId) });
-                        if (!room || users.length === 0) {
-                            // Delete entire room cascade if now empty
-                            await db.collection('rooms').deleteOne({ _id: new ObjectId(roomId) });
-                            await db.collection('messages').deleteMany({ roomId });
-                            await db.collection('polls').deleteMany({ roomId });
-                            await db.collection('votes').deleteMany({ roomId });
-                            await db.collection('users').deleteMany({ roomId }); // idempotent cleanup
-                            roomEventBus.publish(roomId, { type: 'room-deleted', payload: { roomId } });
+                        if (!room) {
+                            return; // already gone
+                        }
+                        if (usersLeft.length === 0) {
+                            // Schedule grace-period deletion instead of immediate, so reload by owner doesn't nuke room.
+                            const existingTimer = timers.get(roomId);
+                            if (!existingTimer) {
+                                const t = setTimeout(async () => {
+                                    try {
+                                        const db2 = await connectToDatabase();
+                                        const stillUsers = await db2.collection('users').find({ roomId }).toArray();
+                                        const stillRoom = await db2.collection('rooms').findOne({ _id: new ObjectId(roomId) });
+                                        if (!stillRoom || stillUsers.length === 0) {
+                                            await db2.collection('rooms').deleteOne({ _id: new ObjectId(roomId) });
+                                            await db2.collection('messages').deleteMany({ roomId });
+                                            await db2.collection('polls').deleteMany({ roomId });
+                                            await db2.collection('votes').deleteMany({ roomId });
+                                            await db2.collection('users').deleteMany({ roomId });
+                                            roomEventBus.publish(roomId, { type: 'room-deleted', payload: { roomId } });
+                                        }
+                                    } finally {
+                                        timers.delete(roomId);
+                                    }
+                                }, GRACE_MS);
+                                timers.set(roomId, t);
+                            }
                         } else {
-                            // Otherwise broadcast updated users list (dedup best-effort)
-                            roomEventBus.publish(roomId, { type: 'users', payload: users });
+                            roomEventBus.publish(roomId, { type: 'users', payload: usersLeft });
                         }
                     } catch {
                         // ignore disconnect cleanup errors

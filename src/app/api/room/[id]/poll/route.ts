@@ -8,9 +8,9 @@ type PollOptionDoc = { _id: ObjectId; text: string; votes: number };
 type PollDoc = { _id: ObjectId; roomId: string | ObjectId; question: string; options: PollOptionDoc[]; active: boolean; createdAt: Date; updatedAt: Date };
 
 // POST /api/room/[id]/poll -> create poll (owner only)
-export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
     const db = await connectToDatabase();
-    const { id: roomId } = await params;
+    const { id: roomId } = params;
     const { anonId, question, options } = await req.json();
     if (!anonId || !question || !Array.isArray(options) || options.length < 2) {
         return NextResponse.json({ error: 'Missing or invalid fields' }, { status: 400 });
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 // GET /api/room/[id]/poll -> list polls
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
     const db = await connectToDatabase();
     const { id: roomId } = await params;
     const polls = (await db

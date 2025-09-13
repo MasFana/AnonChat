@@ -9,9 +9,9 @@ type PollOptionDoc = { _id: ObjectId; text: string; votes: number };
 type PollDoc = { _id: ObjectId; roomId: string | ObjectId; question: string; options: PollOptionDoc[]; active: boolean; createdAt: Date; updatedAt: Date };
 
 // PATCH /api/room/[id]/poll/[pollId] -> update (active flag, question, options?) owner only
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string; pollId: string }> }) {
+export async function PATCH(req: NextRequest, { params }: { params: { id: string; pollId: string } }) {
     const db = await connectToDatabase();
-    const { id: roomId, pollId } = await params;
+    const { id: roomId, pollId } = params;
     const body = await req.json();
     const { anonId } = body as { anonId?: string };
     if (!ObjectId.isValid(pollId)) {
@@ -64,9 +64,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 // DELETE /api/room/[id]/poll/[pollId] -> owner only
-export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string; pollId: string }> }) {
+export async function DELETE(req: NextRequest, { params }: { params: { id: string; pollId: string } }) {
     const db = await connectToDatabase();
-    const { id: roomId, pollId } = await params;
+    const { id: roomId, pollId } = params;
     let anonId: string | undefined;
     try {
         const body = await req.json().catch(() => null);
@@ -99,9 +99,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 }
 
 // POST /api/room/[id]/poll/[pollId] -> vote
-export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string; pollId: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: { id: string; pollId: string } }) {
     const db = await connectToDatabase();
-    const { id: roomId, pollId } = await params;
+    const { id: roomId, pollId } = params;
     const { anonId, optionId } = await req.json();
     if (!ObjectId.isValid(pollId)) return NextResponse.json({ error: 'Invalid pollId', errorCode: 'invalidPollId', pollId }, { status: 400 });
     if (!anonId || !optionId) return NextResponse.json({ error: 'Missing anonId or optionId', errorCode: 'missingFields' }, { status: 400 });

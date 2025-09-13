@@ -1,19 +1,22 @@
 import type { Metadata } from 'next';
 import RoomClient from './roomClient';
 
-export async function generateMetadata({ params }: { params: { id: string } }): Promise<Metadata> {
-    const { id } = params;
-    const title = `Room ${id} · Anon Chat`;
-    const description = `Live anonymous chat room ${id}. Exchange real‑time messages and participate in polls.`;
+// Await params (Next.js warning fix) – treat params as potentially async in newer versions.
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+    const { id } = await params;
+    const safeId = (id || 'room').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) || 'room';
+    const title = `Room ${safeId} · Anon Chat`;
+    const description = `Live anonymous chat room ${safeId}. Exchange real‑time messages and participate in polls.`;
     return {
         title,
         description,
-        openGraph: { title, description, url: `/room/${id}`, type: 'article' },
+        openGraph: { title, description, url: `/room/${safeId}`, type: 'article' },
         twitter: { title, description, card: 'summary' },
-        alternates: { canonical: `/room/${id}` }
+        alternates: { canonical: `/room/${safeId}` }
     };
 }
 
-export default function RoomPage({ params }: { params: { id: string } }) {
-    return <RoomClient roomId={params.id} />;
+export default async function RoomPage({ params }: { params: Promise<{ id: string }> }) {
+    const { id } = await params;
+    return <RoomClient roomId={id} />;
 }

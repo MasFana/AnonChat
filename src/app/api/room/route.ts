@@ -9,6 +9,7 @@ export async function POST(req: NextRequest) {
     const room = {
         ownerId: anonId,
         createdAt: new Date(),
+        isPublic: false,
     };
     const roomResult = await db.collection('rooms').insertOne(room);
     const roomId = roomResult.insertedId.toString();
@@ -26,8 +27,9 @@ export async function GET() {
     try {
         const db = await connectToDatabase();
         const cutoff = new Date(Date.now() - 20000); // 20s recent activity window
-        // Build an aggregation that converts _id to string and joins only recently active users
+        // Public rooms list pipeline
         const pipeline = [
+            { $match: { isPublic: true } },
             { $addFields: { _idStr: { $toString: '$_id' } } },
             {
                 $lookup: {
@@ -51,45 +53,37 @@ export async function GET() {
                     as: 'users',
                 },
             },
-            {
-                $project: {
-                    _id: 1,
-                    _idStr: 1,
-                    createdAt: 1,
-                    ownerId: 1,
-                    userCount: { $size: '$users' },
-                    hasOwner: {
-                        $gt: [
-                            {
-                                $size: {
-                                    $filter: {
-                                        input: '$users',
-                                        as: 'u',
-                                        cond: { $eq: ['$$u._id', '$ownerId'] },
-                                    },
-                                },
-                            },
-                            0,
-                        ],
-                    },
-                },
-            },
+            { $project: { _id: 1, _idStr: 1, createdAt: 1, ownerId: 1, isPublic: 1, userCount: { $size: '$users' }, hasOwner: { $gt: [{ $size: { $filter: { input: '$users', as: 'u', cond: { $eq: ['$$u._id', '$ownerId'] } } } }, 0] } } },
             { $sort: { createdAt: -1 } },
             { $limit: 100 },
         ];
 
-        const rooms = (await db
-            .collection('rooms')
-            .aggregate(pipeline)
-            .toArray()) as Array<{ _idStr: string; createdAt: Date; userCount: number; hasOwner: boolean }>;
-        const normalized = rooms.map((r) => ({
-            id: r._idStr,
-            createdAt: r.createdAt,
-            userCount: r.userCount,
-            hasOwner: r.hasOwner,
-        }));
-        return NextResponse.json({ rooms: normalized });
+        const rooms = (await db.collection('rooms').aggregate(pipeline).toArray()) as Array<{ _idStr: string; createdAt: Date; userCount: number; hasOwner: boolean; isPublic: boolean }>;
+        const normalized = rooms.map((r) => ({ id: r._idStr, createdAt: r.createdAt, userCount: r.userCount, hasOwner: r.hasOwner }));
+
+        // Aggregate stats across all rooms (public + private)
+        const allRooms = await db.collection('rooms').find({}).project({ _id: 1, ownerId: 1, isPublic: 1 }).toArray();
+        const roomIds = allRooms.map(r => r._id.toString());
+        let activeUsers = 0; let ownersOnline = 0; const totalRooms = allRooms.length;
+        if (roomIds.length > 0) {
+            const usersAgg = await db.collection('users').aggregate([
+                { $match: { roomId: { $in: roomIds }, lastSeen: { $gte: cutoff } } },
+                { $group: { _id: '$id' } },
+            ]).toArray();
+            activeUsers = usersAgg.length;
+            // Owners online: owners with a recent user record
+            const ownerIds = allRooms.map(r => r.ownerId).filter(Boolean);
+            if (ownerIds.length) {
+                const ownersSet = new Set(ownerIds);
+                const ownersActive = await db.collection('users').aggregate([
+                    { $match: { id: { $in: Array.from(ownersSet) }, lastSeen: { $gte: cutoff } } },
+                    { $group: { _id: '$id' } },
+                ]).toArray();
+                ownersOnline = ownersActive.length;
+            }
+        }
+        return NextResponse.json({ rooms: normalized, stats: { totalRooms, activeUsers, ownersOnline } });
     } catch {
-        return NextResponse.json({ rooms: [], error: 'failed-to-list-rooms' }, { status: 500 });
+        return NextResponse.json({ rooms: [], stats: { totalRooms: 0, activeUsers: 0, ownersOnline: 0 }, error: 'failed-to-list-rooms' }, { status: 500 });
     }
 }

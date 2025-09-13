@@ -4,14 +4,13 @@ import { ObjectId } from 'mongodb';
 import { roomEventBus } from '@/lib/events';
 
 // GET /api/room/[id]/state
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
     const db = await connectToDatabase();
     const url = new URL(req.url);
     const anonId = url.searchParams.get('anonId');
     if (!anonId) return NextResponse.json({ error: 'Missing anonId' }, { status: 400 });
 
-    // Await params as required by Next.js 15.5+
-    const { id } = await params;
+    const { id } = params;
 
     // Update lastSeen for current user
     await db.collection('users').updateOne(

@@ -12,6 +12,7 @@ export type RoomEvent = {
     | "poll-deleted"
     | "polls-replace"
     | "vote-cast"
+    | "room-visibility"
     | "ping";
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     payload?: any;
