@@ -4,9 +4,9 @@ import { ObjectId } from 'mongodb';
 import { roomEventBus } from '@/lib/events';
 
 // POST /api/room/[id]/message → send a chat message
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+    const { id } = await ctx.params; // await per Next.js dynamic route guidance
     const db = await connectToDatabase();
-    const { id } = await params;
     const body = await req.json().catch(() => ({} as Record<string, unknown>));
     const anonId = typeof body.anonId === 'string' ? body.anonId.slice(0, 64) : '';
     let content = typeof body.content === 'string' ? body.content : '';

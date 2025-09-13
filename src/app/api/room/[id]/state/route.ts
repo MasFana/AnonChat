@@ -4,13 +4,12 @@ import { ObjectId } from 'mongodb';
 import { roomEventBus } from '@/lib/events';
 
 // GET /api/room/[id]/state
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+    const { id } = await ctx.params;
     const db = await connectToDatabase();
     const url = new URL(req.url);
     const anonId = url.searchParams.get('anonId');
     if (!anonId) return NextResponse.json({ error: 'Missing anonId' }, { status: 400 });
-
-    const { id } = params;
 
     // Update lastSeen for current user
     await db.collection('users').updateOne(
