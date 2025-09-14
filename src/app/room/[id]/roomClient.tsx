@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Users, MessageCircle, ChevronDown } from 'lucide-react';
+import { Users, MessageCircle, ChevronDown, Bell, BellOff } from 'lucide-react';
 import Link from 'next/link';
 
 async function getOrCreateAnonId(): Promise<string | null> {
@@ -48,6 +48,21 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   // Start with null universally (SSR + first client render) to avoid hydration mismatch.
   // We'll populate anonId after mount.
   const [anonId, setAnonId] = useState<string | null>(null);
+  // Notification toggle state
+  const [notifyEnabled, setNotifyEnabled] = useState<boolean>(false);
+  // Keep latest anonId in a ref for event listeners
+  const anonIdRef = useRef<string | null>(null);
+  const lastNotifiedMessageIdRef = useRef<string | undefined>(undefined);
+
+  // Load persisted notification preference
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const stored = localStorage.getItem('roomNotifyEnabled');
+    if (stored === '1') setNotifyEnabled(true);
+  }, []);
+
+  // Sync anonId into ref for SSE handlers
+  useEffect(() => { anonIdRef.current = anonId; }, [anonId]);
 
   const dedupedUsers = React.useMemo(() => {
     const seen = new Set<string>();
@@ -69,83 +84,101 @@ export default function RoomClient({ roomId }: { roomId: string }) {
         if (mounted && id) setAnonId(id);
       }
       if (!id) return; // cannot proceed without id (very unlikely)
-    let cancelled = false; let reconcileInterval: NodeJS.Timeout | null = null;
-    const loadMetaAndConnect = async () => {
-      try {
-        // 1. Fetch lightweight meta first
-        const metaRes = await fetch(`/api/room/${roomId}/meta`, { cache: 'no-store' });
-        if (!metaRes.ok) {
-          if (metaRes.status === 404) { router.replace('/?msg=Room%20not%20found'); return; }
-        } else {
-          const meta = await metaRes.json().catch(() => null);
-          if (meta && meta.ownerId) setOwner(meta.ownerId);
-          if (meta && typeof meta.isPublic === 'boolean') setIsPublic(meta.isPublic);
+      let cancelled = false; let reconcileInterval: NodeJS.Timeout | null = null;
+      const loadMetaAndConnect = async () => {
+        try {
+          // 1. Fetch lightweight meta first
+          const metaRes = await fetch(`/api/room/${roomId}/meta`, { cache: 'no-store' });
+          if (!metaRes.ok) {
+            if (metaRes.status === 404) { router.replace('/?msg=Room%20not%20found'); return; }
+          } else {
+            const meta = await metaRes.json().catch(() => null);
+            if (meta && meta.ownerId) setOwner(meta.ownerId);
+            if (meta && typeof meta.isPublic === 'boolean') setIsPublic(meta.isPublic);
+          }
+        } finally {
+          setMetaLoading(false);
         }
-      } finally {
-        setMetaLoading(false);
-      }
-      if (cancelled) return;
-      // 2. Join (presence)
-      try {
-        const res = await fetch(`/api/room/${roomId}/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ anonId: id }) });
-        if (res.ok) {
-          const data = await res.json().catch(() => null);
-          if (data && typeof data.ownerId === 'string') setOwner(data.ownerId);
-        }
-      } catch { }
-      if (cancelled) return;
-      if (sseRef.current) { try { sseRef.current.close(); } catch { } sseRef.current = null; }
-      const es = new EventSource(`/api/room/${roomId}/sse?anonId=${id}`); sseRef.current = es;
-      const upsertPolls = (incoming: PollClient | PollClient[]) => {
-        setPolls(prev => {
-          const map = new Map<string, PollClient>(); prev.forEach(p => map.set(p._id, p));
-          const arr = Array.isArray(incoming) ? incoming : [incoming];
-          arr.forEach(p => map.set(p._id, p));
-          return Array.from(map.values());
+        if (cancelled) return;
+        // 2. Join (presence)
+        try {
+          const res = await fetch(`/api/room/${roomId}/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ anonId: id }) });
+          if (res.ok) {
+            const data = await res.json().catch(() => null);
+            if (data && typeof data.ownerId === 'string') setOwner(data.ownerId);
+          }
+        } catch { }
+        if (cancelled) return;
+        if (sseRef.current) { try { sseRef.current.close(); } catch { } sseRef.current = null; }
+        const es = new EventSource(`/api/room/${roomId}/sse?anonId=${id}`); sseRef.current = es;
+        const upsertPolls = (incoming: PollClient | PollClient[]) => {
+          setPolls(prev => {
+            const map = new Map<string, PollClient>(); prev.forEach(p => map.set(p._id, p));
+            const arr = Array.isArray(incoming) ? incoming : [incoming];
+            arr.forEach(p => map.set(p._id, p));
+            return Array.from(map.values());
+          });
+        };
+        es.addEventListener('snapshot', (ev: MessageEvent) => {
+          const { payload } = JSON.parse(ev.data);
+          setUsers(payload.users); setMessages(payload.messages); setOwner(payload.owner); setMyVotes(payload.myVotes || {});
+          // If we have an optimistic pending visibility change, prefer that until an explicit room-visibility event arrives
+          if (pendingVisibilityRef.current === null) {
+            setIsPublic(!!payload.isPublic);
+          }
+          const unique = (payload.polls || []).reduce((acc: Record<string, PollClient>, p: PollClient) => { acc[p._id] = p; return acc; }, {});
+          setPolls(Object.values(unique));
+          if (typeof payload.pollsVersion === 'number') lastVersionRef.current = payload.pollsVersion;
         });
+        es.addEventListener('room-visibility', (ev: MessageEvent) => { try { const { payload } = JSON.parse(ev.data); if (payload?.roomId === roomId && typeof payload.isPublic === 'boolean') { setIsPublic(payload.isPublic); pendingVisibilityRef.current = null; setVisibilityBusy(false); } } catch { } });
+        es.addEventListener('users', (ev: MessageEvent) => { const { payload } = JSON.parse(ev.data); setUsers(payload); });
+        es.addEventListener('message', (ev: MessageEvent) => {
+          const { payload } = JSON.parse(ev.data);
+          setMessages(prev => [...prev, payload]);
+          try {
+            if (!payload) return;
+            const currentAnon = anonIdRef.current;
+            const shouldNotify = notifyEnabled && currentAnon && payload.userId !== currentAnon;
+            if (shouldNotify) {
+              if (payload.id && lastNotifiedMessageIdRef.current === payload.id) return; // duplicate guard
+              if (payload.id) lastNotifiedMessageIdRef.current = payload.id;
+              if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+                new Notification(`New message in room ${roomId}`.slice(0, 60), {
+                  body: (payload.content || 'New message').slice(0, 140),
+                  tag: payload.id || `${roomId}-latest`,
+                });
+              }
+            }
+          } catch { /* ignore notification errors */ }
+        });
+        es.addEventListener('poll-created', (ev: MessageEvent) => { const { payload } = JSON.parse(ev.data); upsertPolls(payload); });
+        es.addEventListener('poll-updated', (ev: MessageEvent) => {
+          const { payload } = JSON.parse(ev.data); if (!payload || Array.isArray(payload)) return;
+          const { _id, active } = payload as { _id?: string; active?: boolean }; if (!_id || typeof active !== 'boolean') return;
+          setPolls(prev => prev.map(p => p._id === _id ? (p.active === active ? p : { ...p, active }) : p));
+        });
+        es.addEventListener('polls-replace', (ev: MessageEvent) => {
+          const { payload } = JSON.parse(ev.data);
+          if (Array.isArray(payload)) { const unique = payload.reduce((acc: Record<string, PollClient>, p: PollClient) => { acc[p._id] = p; return acc; }, {}); setPolls(Object.values(unique)); return; }
+          if (payload && Array.isArray(payload.polls)) {
+            const { version, polls: list } = payload as { version?: number; polls: PollClient[] };
+            if (typeof version === 'number') { if (version <= lastVersionRef.current) return; lastVersionRef.current = version; }
+            const unique = list.reduce((acc: Record<string, PollClient>, p: PollClient) => { acc[p._id] = p; return acc; }, {}); setPolls(Object.values(unique));
+          }
+        });
+        es.addEventListener('poll-deleted', (ev: MessageEvent) => { const { payload } = JSON.parse(ev.data); setPolls(prev => prev.filter(p => p._id !== payload._id)); });
+        es.addEventListener('vote-cast', (ev: MessageEvent) => {
+          const { payload } = JSON.parse(ev.data);
+          if (payload?.poll) upsertPolls(payload.poll);
+          if (payload?.anonId && payload?.pollId && payload?.optionId && payload.anonId === id) setMyVotes(prev => ({ ...prev, [payload.pollId]: payload.optionId }));
+        });
+        es.addEventListener('room-deleted', () => { router.replace('/?msg=Room closed'); });
+        reconcileInterval = setInterval(async () => {
+          if (cancelled) return; try { const res = await fetch(`/api/room/${roomId}/poll`); if (res.ok) { const json = await res.json(); const list: PollClient[] = Array.isArray(json?.polls) ? json.polls : []; if (list.length) setPolls(list); } } catch { }
+        }, 60000);
       };
-      es.addEventListener('snapshot', (ev: MessageEvent) => {
-        const { payload } = JSON.parse(ev.data);
-        setUsers(payload.users); setMessages(payload.messages); setOwner(payload.owner); setMyVotes(payload.myVotes || {});
-        // If we have an optimistic pending visibility change, prefer that until an explicit room-visibility event arrives
-        if (pendingVisibilityRef.current === null) {
-          setIsPublic(!!payload.isPublic);
-        }
-        const unique = (payload.polls || []).reduce((acc: Record<string, PollClient>, p: PollClient) => { acc[p._id] = p; return acc; }, {});
-        setPolls(Object.values(unique));
-        if (typeof payload.pollsVersion === 'number') lastVersionRef.current = payload.pollsVersion;
-      });
-      es.addEventListener('room-visibility', (ev: MessageEvent) => { try { const { payload } = JSON.parse(ev.data); if (payload?.roomId === roomId && typeof payload.isPublic === 'boolean') { setIsPublic(payload.isPublic); pendingVisibilityRef.current = null; setVisibilityBusy(false); } } catch { } });
-      es.addEventListener('users', (ev: MessageEvent) => { const { payload } = JSON.parse(ev.data); setUsers(payload); });
-      es.addEventListener('message', (ev: MessageEvent) => { const { payload } = JSON.parse(ev.data); setMessages(prev => [...prev, payload]); });
-      es.addEventListener('poll-created', (ev: MessageEvent) => { const { payload } = JSON.parse(ev.data); upsertPolls(payload); });
-      es.addEventListener('poll-updated', (ev: MessageEvent) => {
-        const { payload } = JSON.parse(ev.data); if (!payload || Array.isArray(payload)) return;
-        const { _id, active } = payload as { _id?: string; active?: boolean }; if (!_id || typeof active !== 'boolean') return;
-        setPolls(prev => prev.map(p => p._id === _id ? (p.active === active ? p : { ...p, active }) : p));
-      });
-      es.addEventListener('polls-replace', (ev: MessageEvent) => {
-        const { payload } = JSON.parse(ev.data);
-        if (Array.isArray(payload)) { const unique = payload.reduce((acc: Record<string, PollClient>, p: PollClient) => { acc[p._id] = p; return acc; }, {}); setPolls(Object.values(unique)); return; }
-        if (payload && Array.isArray(payload.polls)) {
-          const { version, polls: list } = payload as { version?: number; polls: PollClient[] };
-          if (typeof version === 'number') { if (version <= lastVersionRef.current) return; lastVersionRef.current = version; }
-          const unique = list.reduce((acc: Record<string, PollClient>, p: PollClient) => { acc[p._id] = p; return acc; }, {}); setPolls(Object.values(unique));
-        }
-      });
-      es.addEventListener('poll-deleted', (ev: MessageEvent) => { const { payload } = JSON.parse(ev.data); setPolls(prev => prev.filter(p => p._id !== payload._id)); });
-      es.addEventListener('vote-cast', (ev: MessageEvent) => {
-        const { payload } = JSON.parse(ev.data);
-        if (payload?.poll) upsertPolls(payload.poll);
-        if (payload?.anonId && payload?.pollId && payload?.optionId && payload.anonId === id) setMyVotes(prev => ({ ...prev, [payload.pollId]: payload.optionId }));
-      });
-      es.addEventListener('room-deleted', () => { router.replace('/?msg=Room closed'); });
-      reconcileInterval = setInterval(async () => {
-        if (cancelled) return; try { const res = await fetch(`/api/room/${roomId}/poll`); if (res.ok) { const json = await res.json(); const list: PollClient[] = Array.isArray(json?.polls) ? json.polls : []; if (list.length) setPolls(list); } } catch { }
-      }, 60000);
-    };
-    loadMetaAndConnect();
-    return () => { cancelled = true; if (reconcileInterval) clearInterval(reconcileInterval); if (sseRef.current) { try { sseRef.current.close(); } catch { } sseRef.current = null; } };
+      loadMetaAndConnect();
+      return () => { cancelled = true; if (reconcileInterval) clearInterval(reconcileInterval); if (sseRef.current) { try { sseRef.current.close(); } catch { } sseRef.current = null; } };
     };
     ensureIdAndStart();
     return () => { mounted = false; };
@@ -179,74 +212,99 @@ export default function RoomClient({ roomId }: { roomId: string }) {
       <main className="flex-1 flex flex-col items-center animate-fade-in overflow-hidden w-full">
         <Card className="w-full flex flex-col flex-1 py-4 h-full max-h-full shadow-2xl border-border rounded-none bg-card gap-0">
           <CardHeader className="px-4">
-            <div className="flex items-center justify-between w-full">
-              <CardTitle className="text-xl flex items-center gap-2 text-foreground">
-                <MessageCircle className="w-5 h-5" />
-                <span className="hidden sm:inline">Room: </span>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(roomId);
-                      const btn = document.getElementById('room-id-copy');
-                      if (btn) {
-                        btn.dataset.copied = 'true';
-                        setTimeout(() => { delete btn.dataset.copied; }, 1600);
-                      }
-                    } catch { /* ignore */ }
-                  }}
-                  id="room-id-copy"
-                  className="relative group text-sm sm:text-xl font-mono px-2 py-1 rounded hover:bg-accent/40 border border-transparent hover:border-accent/40 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  title="Click to copy room ID"
-                >
-                  <span className="pr-4 select-all">{roomId}</span>
-                  <span className="pointer-events-none absolute top-0 right-0 -translate-y-full mt-[-2px] opacity-0 group-data-[copied=true]:opacity-100 group-data-[copied=true]:translate-y-0 text-[10px] tracking-wide text-emerald-300 transition-all duration-300">Copied!</span>
-                </button>
-              </CardTitle>
-              <div className="flex items-center gap-2">
-                {metaLoading ? (
-                  <span className="text-[11px] px-3 py-1 rounded-full border border-border/50 text-muted-foreground flex items-center gap-1">
-                    <span className="h-3 w-3 animate-spin border-2 border-border border-t-transparent rounded-full" />
-                    Loading…
-                  </span>
-                ) : owner === anonId ? (
-                  <Button
-                    variant={isPublic ? 'secondary' : 'default'}
-                    size="sm"
+            <div className="w-full flex flex-col gap-2">
+              <div className="flex items-center gap-2 w-full">
+                <CardTitle className="flex items-center gap-2 text-foreground text-base sm:text-lg md:text-xl min-w-0 flex-1">
+                  <MessageCircle className="w-5 h-5 shrink-0" />
+                  <span className="hidden sm:inline shrink-0">Room:</span>
+                  <button
+                    type="button"
                     onClick={async () => {
-                      if (visibilityBusy) return; // debounce rapid clicks
-                      setVisibilityBusy(true);
-                      const target = !isPublic;
-                      pendingVisibilityRef.current = target;
-                      setIsPublic(target); // optimistic
                       try {
-                        const res = await fetch(`/api/room/${roomId}/visibility`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ anonId, isPublic: target }) });
-                        if (!res.ok) { // revert if server rejected
-                          pendingVisibilityRef.current = null;
-                          setIsPublic(!target);
-                          setVisibilityBusy(false);
-                        } else {
-                          // Wait for SSE event to clear busy state; fallback timeout just in case
-                          setTimeout(() => { if (pendingVisibilityRef.current !== null) { setVisibilityBusy(false); pendingVisibilityRef.current = null; } }, 4000);
-                        }
-                      } catch {
-                        pendingVisibilityRef.current = null;
-                        setIsPublic(!target);
-                        setVisibilityBusy(false);
-                      }
+                        await navigator.clipboard.writeText(roomId);
+                        const btn = document.getElementById('room-id-copy');
+                        if (btn) { btn.dataset.copied = 'true'; setTimeout(() => { delete btn.dataset.copied; }, 1600); }
+                      } catch { }
                     }}
-                    disabled={metaLoading || visibilityBusy}
-                    title={isPublic ? 'Make room hidden' : 'Make room public'}
-                  >{isPublic ? 'Public' : 'Hidden'}</Button>
-                ) : (
-                  <span
-                    className={'text-[11px] px-2 py-1 rounded-full border font-medium tracking-wide ' + (isPublic
-                      ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                      : 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30')}
-                    title={isPublic ? 'This room is publicly listed' : 'This room is hidden (private)'}
-                  >{isPublic ? 'Public' : 'Hidden'}</span>
-                )}
-                <Button asChild variant="secondary"><Link href="/">Home</Link></Button>
+                    id="room-id-copy"
+                    className="relative group font-mono px-2 py-1 rounded hover:bg-accent/40 border border-transparent hover:border-accent/40 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 max-w-[40vw] sm:max-w-[320px] md:max-w-[420px] overflow-hidden"
+                    title="Click to copy room ID"
+                  >
+                    <span className="select-all block truncate" data-hide-when-overflow="true">{roomId}</span>
+                    <span className="pointer-events-none absolute top-0 right-0 -translate-y-full mt-[-2px] opacity-0 group-data-[copied=true]:opacity-100 group-data-[copied=true]:translate-y-0 text-[10px] tracking-wide text-emerald-300 transition-all duration-300">Copied!</span>
+                  </button>
+                </CardTitle>
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Notification toggle */}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        if (!notifyEnabled) {
+                          // turning on
+                          if (typeof Notification !== 'undefined') {
+                            if (Notification.permission === 'default') {
+                              const perm = await Notification.requestPermission();
+                              if (perm !== 'granted') return; // abort enable
+                            } else if (Notification.permission !== 'granted') {
+                              return; // can't enable
+                            }
+                          } else { return; }
+                        }
+                        setNotifyEnabled(v => {
+                          const next = !v; localStorage.setItem('roomNotifyEnabled', next ? '1' : '0');
+                          if (next && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+                            try {
+                              new Notification('Notifications enabled', { body: 'You will be alerted for new messages.' });
+                            } catch { /* ignore */ }
+                          }
+                          return next;
+                        });
+                      } catch { }
+                    }}
+                    className={'relative flex items-center gap-1 px-2 py-1 rounded border text-[11px] font-medium transition ' + (notifyEnabled ? 'bg-primary/20 border-primary/40 text-primary-foreground/90 hover:bg-primary/30' : 'bg-transparent border-border hover:bg-accent/40 text-muted-foreground')}
+                    title={notifyEnabled ? 'Disable message notifications' : 'Enable message notifications'}
+                  >
+                    {notifyEnabled ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
+                    <span className="hidden sm:inline">Notify</span>
+                  </button>
+                  {metaLoading ? (
+                    <span className="text-[11px] px-3 py-1 rounded-full border border-border/50 text-muted-foreground flex items-center gap-1">
+                      <span className="h-3 w-3 animate-spin border-2 border-border border-t-transparent rounded-full" />
+                      Load
+                    </span>
+                  ) : owner === anonId ? (
+                    <Button
+                      variant={isPublic ? 'secondary' : 'default'}
+                      size="sm"
+                      onClick={async () => {
+                        if (visibilityBusy) return;
+                        setVisibilityBusy(true);
+                        const target = !isPublic; pendingVisibilityRef.current = target; setIsPublic(target);
+                        try {
+                          const res = await fetch(`/api/room/${roomId}/visibility`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ anonId, isPublic: target }) });
+                          if (!res.ok) {
+                            pendingVisibilityRef.current = null; setIsPublic(!target); setVisibilityBusy(false);
+                          } else {
+                            setTimeout(() => { if (pendingVisibilityRef.current !== null) { setVisibilityBusy(false); pendingVisibilityRef.current = null; } }, 4000);
+                          }
+                        } catch {
+                          pendingVisibilityRef.current = null; setIsPublic(!target); setVisibilityBusy(false);
+                        }
+                      }}
+                      disabled={metaLoading || visibilityBusy}
+                      title={isPublic ? 'Make room hidden' : 'Make room public'}
+                    >{isPublic ? 'Public' : 'Hidden'}</Button>
+                  ) : (
+                    <span
+                      className={'text-[11px] px-2 py-1 rounded-full border font-medium tracking-wide ' + (isPublic
+                        ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                        : 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30')}
+                      title={isPublic ? 'This room is publicly listed' : 'This room is hidden (private)'}
+                    >{isPublic ? 'Public' : 'Hidden'}</span>
+                  )}
+                  <Button asChild variant="secondary" size="sm" className="shrink-0"><Link href="/">Home</Link></Button>
+                </div>
               </div>
             </div>
             <div className="font-bold md:mb-4 md:hidden text-lg flex items-center gap-2 text-foreground">
@@ -294,6 +352,10 @@ export default function RoomClient({ roomId }: { roomId: string }) {
         .custom-scrollbar { scrollbar-width: thin; scrollbar-color: #444 transparent; }
         .animate-fade-lite { animation: fadeLite 220ms ease-out; }
         @keyframes fadeLite { from { opacity: 0; } to { opacity: 1; } }
+        /* Hide the room id text fully if the header becomes extremely narrow (<300px) */
+        @media (max-width: 360px) {
+          #room-id-copy span[data-hide-when-overflow] { display: none; }
+        }
       `}</style>
     </div>
   );
