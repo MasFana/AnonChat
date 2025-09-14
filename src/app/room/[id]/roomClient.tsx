@@ -50,8 +50,9 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   const [anonId, setAnonId] = useState<string | null>(null);
   // Notification toggle state
   const [notifyEnabled, setNotifyEnabled] = useState<boolean>(false);
-  // Keep latest anonId in a ref for event listeners
+  // Keep latest values in refs for event listeners (avoid stale closure without re-adding listeners)
   const anonIdRef = useRef<string | null>(null);
+  const notifyEnabledRef = useRef<boolean>(false);
   const lastNotifiedMessageIdRef = useRef<string | undefined>(undefined);
 
   // Load persisted notification preference
@@ -61,8 +62,9 @@ export default function RoomClient({ roomId }: { roomId: string }) {
     if (stored === '1') setNotifyEnabled(true);
   }, []);
 
-  // Sync anonId into ref for SSE handlers
+  // Sync values into refs for SSE handlers
   useEffect(() => { anonIdRef.current = anonId; }, [anonId]);
+  useEffect(() => { notifyEnabledRef.current = notifyEnabled; }, [notifyEnabled]);
 
   const dedupedUsers = React.useMemo(() => {
     const seen = new Set<string>();
@@ -137,19 +139,23 @@ export default function RoomClient({ roomId }: { roomId: string }) {
           setMessages(prev => [...prev, payload]);
           try {
             if (!payload) return;
-            const currentAnon = anonIdRef.current;
-            const shouldNotify = notifyEnabled && currentAnon && payload.userId !== currentAnon;
-            if (shouldNotify) {
-              if (payload.id && lastNotifiedMessageIdRef.current === payload.id) return; // duplicate guard
-              if (payload.id) lastNotifiedMessageIdRef.current = payload.id;
-              if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-                new Notification(`New message in room ${roomId}`.slice(0, 60), {
-                  body: (payload.content || 'New message').slice(0, 140),
-                  tag: payload.id || `${roomId}-latest`,
-                });
-              }
-            }
-          } catch { /* ignore notification errors */ }
+            // Only attempt if enabled and browser supports Notification API
+            if (!notifyEnabledRef.current || typeof Notification === 'undefined') return;
+            if (Notification.permission !== 'granted') return;
+            const me = anonIdRef.current;
+            if (me && payload.userId === me) return; // ignore own messages
+            const msgId = payload.id || payload.createdAt;
+            if (msgId && lastNotifiedMessageIdRef.current === msgId) return; // de-dupe
+            if (msgId) lastNotifiedMessageIdRef.current = msgId;
+            const n = new Notification(`New message`, {
+              body: (payload.content || '').slice(0, 140) || 'New message',
+              tag: msgId || `${roomId}-latest`, // tag collapses duplicates
+            });
+            // Auto-close after 5 seconds (best-effort; some browsers may ignore)
+            setTimeout(() => {
+              try { n.close(); } catch { /* ignore */ }
+            }, 5000);
+          } catch { /* swallow notification errors */ }
         });
         es.addEventListener('poll-created', (ev: MessageEvent) => { const { payload } = JSON.parse(ev.data); upsertPolls(payload); });
         es.addEventListener('poll-updated', (ev: MessageEvent) => {
