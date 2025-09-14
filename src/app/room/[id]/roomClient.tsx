@@ -147,8 +147,8 @@ export default function RoomClient({ roomId }: { roomId: string }) {
             const msgId = payload.id || payload.createdAt;
             if (msgId && lastNotifiedMessageIdRef.current === msgId) return; // de-dupe
             if (msgId) lastNotifiedMessageIdRef.current = msgId;
-            const n = new Notification(`New message`, {
-              body: (payload.content || '').slice(0, 140) || 'New message',
+            const n = new Notification((payload.content || '').slice(0, 140) || 'New message', {
+              body: payload.userId + '@' + roomId,
               tag: msgId || `${roomId}-latest`, // tag collapses duplicates
             });
             // Auto-close after 5 seconds (best-effort; some browsers may ignore)
