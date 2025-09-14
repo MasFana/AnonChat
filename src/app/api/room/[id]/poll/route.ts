@@ -49,7 +49,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     const db = await connectToDatabase();
     const polls = (await db
         .collection('polls')
-        .find({ $or: [{ roomId }, { roomId: new ObjectId(roomId) }] })
+        .find({ roomId: new ObjectId(roomId) })
         .sort({ createdAt: -1 })
         .toArray()) as PollDoc[];
     const normalized = polls.map((p) => ({

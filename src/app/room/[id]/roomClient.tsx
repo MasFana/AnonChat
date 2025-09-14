@@ -44,6 +44,7 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   const [myVotes, setMyVotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const sseRef = useRef<EventSource | null>(null);
+  const terminatedRef = useRef(false); // set when room-deleted so we do not recreate SSE
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   // Start with null universally (SSR + first client render) to avoid hydration mismatch.
   // We'll populate anonId after mount.
@@ -112,7 +113,8 @@ export default function RoomClient({ roomId }: { roomId: string }) {
         } catch { }
         if (cancelled) return;
         if (sseRef.current) { try { sseRef.current.close(); } catch { } sseRef.current = null; }
-        const es = new EventSource(`/api/room/${roomId}/sse?anonId=${id}`); sseRef.current = es;
+  if (terminatedRef.current) return; // do not reconnect after termination
+  const es = new EventSource(`/api/room/${roomId}/sse?anonId=${id}`); sseRef.current = es;
         const upsertPolls = (incoming: PollClient | PollClient[]) => {
           setPolls(prev => {
             const map = new Map<string, PollClient>(); prev.forEach(p => map.set(p._id, p));
@@ -178,7 +180,12 @@ export default function RoomClient({ roomId }: { roomId: string }) {
           if (payload?.poll) upsertPolls(payload.poll);
           if (payload?.anonId && payload?.pollId && payload?.optionId && payload.anonId === id) setMyVotes(prev => ({ ...prev, [payload.pollId]: payload.optionId }));
         });
-        es.addEventListener('room-deleted', () => { router.replace('/?msg=Room closed'); });
+        es.addEventListener('room-deleted', () => {
+          terminatedRef.current = true;
+          try { es.close(); } catch { }
+          sseRef.current = null;
+          router.replace('/?msg=Room+Closed');
+        });
         reconcileInterval = setInterval(async () => {
           if (cancelled) return; try { const res = await fetch(`/api/room/${roomId}/poll`); if (res.ok) { const json = await res.json(); const list: PollClient[] = Array.isArray(json?.polls) ? json.polls : []; if (list.length) setPolls(list); } } catch { }
         }, 60000);

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
-import { roomEventBus } from '@/lib/events';
+import { STALE_USER_PRUNE_MS, MAX_SNAPSHOT_MESSAGES } from '@/lib/constants';
+import { deleteRoom } from '@/lib/deleteRoom';
 
 // GET /api/room/[id]/state
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -17,9 +18,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         { $set: { lastSeen: new Date() } }
     );
 
-    // Remove inactive users (lastSeen > 10s ago)
-    const tenSecondsAgo = new Date(Date.now() - 10000);
-    await db.collection('users').deleteMany({ roomId: id, lastSeen: { $lt: tenSecondsAgo } });
+    // Remove inactive users
+    const staleCutoff = new Date(Date.now() - STALE_USER_PRUNE_MS);
+    await db.collection('users').deleteMany({ roomId: id, lastSeen: { $lt: staleCutoff } });
 
     // Get current users and room
     const users = await db.collection('users').find({ roomId: id }).toArray();
@@ -27,14 +28,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (!room || users.length === 0 || !users.find((u: any) => u.id === room.ownerId)) {
         // Cleanup: delete room, messages, users
-        await db.collection('rooms').deleteOne({ _id: new ObjectId(id) });
-        await db.collection('messages').deleteMany({ roomId: id });
-        await db.collection('users').deleteMany({ roomId: id });
-        await db.collection('polls').deleteMany({ roomId: id });
-        await db.collection('votes').deleteMany({ roomId: id });
-        roomEventBus.publish(id, { type: 'room-deleted', payload: { roomId: id } });
+        await deleteRoom(id);
         return NextResponse.json({ deleted: true });
     }
-    const messages = await db.collection('messages').find({ roomId: id }).sort({ createdAt: 1 }).toArray();
+    const messages = (await db.collection('messages')
+        .find({ roomId: id })
+        .sort({ createdAt: -1 })
+        .limit(MAX_SNAPSHOT_MESSAGES)
+        .toArray()).reverse();
     return NextResponse.json({ users, messages, owner: room.ownerId });
 }

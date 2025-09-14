@@ -27,7 +27,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     // Find by _id and match roomId (string or ObjectId)
     const existing = (await db.collection('polls').findOne({
         _id: new ObjectId(pollId),
-        $or: [{ roomId }, { roomId: new ObjectId(roomId) }],
+        roomId: new ObjectId(roomId),
     })) as PollDoc | null;
     if (!existing) return NextResponse.json({ error: 'Poll not found', errorCode: 'pollByIdOrRoomNotFound', roomId, pollId }, { status: 404 });
     // Short-circuit if no change
@@ -36,11 +36,11 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     }
     const res = await db
         .collection('polls')
-        .findOneAndUpdate({ _id: new ObjectId(pollId), $or: [{ roomId }, { roomId: new ObjectId(roomId) }] }, { $set: { active, updatedAt: new Date() } }, { returnDocument: 'after' });
+        .findOneAndUpdate({ _id: new ObjectId(pollId), roomId: new ObjectId(roomId) }, { $set: { active, updatedAt: new Date() } }, { returnDocument: 'after' });
     let updated = res?.value as PollDoc | undefined;
     if (!updated) {
         // Fallback: refetch in case race changed it to desired value already
-        const refetched = await db.collection('polls').findOne({ _id: new ObjectId(pollId), $or: [{ roomId }, { roomId: new ObjectId(roomId) }] }) as PollDoc | null;
+        const refetched = await db.collection('polls').findOne({ _id: new ObjectId(pollId), roomId: new ObjectId(roomId) }) as PollDoc | null;
         if (refetched && refetched.active === active) {
             updated = refetched; // treat as success (idempotent)
         } else {
@@ -79,7 +79,7 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
     if (room.ownerId !== anonId) return NextResponse.json({ error: 'Forbidden', errorCode: 'forbiddenNotOwner' }, { status: 403 });
 
     // Attempt atomic delete; treat missing as already-deleted (idempotent behavior)
-    const res = await db.collection('polls').findOneAndDelete({ _id: new ObjectId(pollId), $or: [{ roomId }, { roomId: new ObjectId(roomId) }] });
+    const res = await db.collection('polls').findOneAndDelete({ _id: new ObjectId(pollId), roomId: new ObjectId(roomId) });
     if (!res || !res.value) {
         // Already deleted: still emit deletion + refreshed list so late-joining clients sync
         roomEventBus.publish(roomId, { type: 'poll-deleted', payload: { _id: pollId, already: true } });
@@ -105,7 +105,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const { anonId, optionId } = await req.json();
     if (!ObjectId.isValid(pollId)) return NextResponse.json({ error: 'Invalid pollId', errorCode: 'invalidPollId', pollId }, { status: 400 });
     if (!anonId || !optionId) return NextResponse.json({ error: 'Missing anonId or optionId', errorCode: 'missingFields' }, { status: 400 });
-    const poll = (await db.collection('polls').findOne({ _id: new ObjectId(pollId), $or: [{ roomId }, { roomId: new ObjectId(roomId) }] })) as PollDoc | null;
+    const poll = (await db.collection('polls').findOne({ _id: new ObjectId(pollId), roomId: new ObjectId(roomId) })) as PollDoc | null;
     if (!poll) return NextResponse.json({ error: 'Poll not found', errorCode: 'pollByIdOrRoomNotFound', roomId, pollId }, { status: 404 });
     if (!poll.active) return NextResponse.json({ error: 'Poll is closed', errorCode: 'pollClosed' }, { status: 400 });
 

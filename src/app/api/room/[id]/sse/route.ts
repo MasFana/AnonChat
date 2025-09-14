@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import { roomEventBus } from '@/lib/events';
 import { getPollsVersion } from '@/lib/pollsSync';
+import { OWNER_AWAY_GRACE_MS, RECENT_USER_WINDOW_MS, STALE_USER_PRUNE_MS, PRESENCE_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, LAST_SEEN_WRITE_THROTTLE_MS, MAX_SNAPSHOT_MESSAGES } from '@/lib/constants';
+import { deleteRoom } from '@/lib/deleteRoom';
 import { ObjectId } from 'mongodb';
 
 export const runtime = 'nodejs';
@@ -22,6 +24,23 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     const anonId = url.searchParams.get('anonId');
     if (!anonId) {
         return new Response('Missing anonId', { status: 400 });
+    }
+
+    // Fast path: if room does not exist, respond 410 Gone (client should not retry)
+    try {
+        const dbEarly = await connectToDatabase();
+        const exists = await dbEarly.collection('rooms').findOne({ _id: new ObjectId(roomId) });
+        if (!exists) {
+            return new Response('Room closed', {
+                status: 410,
+                headers: {
+                    'Cache-Control': 'no-cache',
+                    'Content-Type': 'text/plain'
+                }
+            });
+        }
+    } catch {
+        // On DB error we continue to attempt stream (could fallback to 503)
     }
 
     const stream = new ReadableStream<Uint8Array>({
@@ -47,15 +66,22 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
                 const db = await connectToDatabase();
                 const room = await db.collection('rooms').findOne({ _id: new ObjectId(roomId) });
                 if (!room) {
+                    // In rare race, room deleted after early existence check: emit room-deleted with retry suppression then close.
+                    try {
+                        controller.enqueue(new TextEncoder().encode('retry: 0\n'));
+                    } catch { }
                     send({ type: 'room-deleted', payload: { roomId } });
+                    try { controller.close(); } catch { }
                 } else {
-                    const recentCutoff = new Date(Date.now() - 20000); // 20s
+                    const recentCutoff = new Date(Date.now() - RECENT_USER_WINDOW_MS);
                     const users = (await db.collection('users').find({ roomId, lastSeen: { $gte: recentCutoff } }).toArray()) as unknown as Array<{ id: string }>;
-                    const messagesRaw = (await db
+                    const messagesRawFull = (await db
                         .collection('messages')
                         .find({ roomId })
-                        .sort({ createdAt: 1 })
+                        .sort({ createdAt: -1 })
+                        .limit(MAX_SNAPSHOT_MESSAGES)
                         .toArray()) as Array<{ _id: ObjectId; roomId: string; userId: string; content: string; createdAt: Date }>;
+                    const messagesRaw = messagesRawFull.reverse(); // restore chronological order
                     const messages = messagesRaw.map((m) => ({
                         id: String(m._id),
                         roomId: m.roomId,
@@ -65,7 +91,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
                     }));
                     const pollsRaw = (await db
                         .collection('polls')
-                        .find({ $or: [{ roomId }, { roomId: new ObjectId(roomId) }] })
+                        .find({ roomId: new ObjectId(roomId) })
                         .sort({ createdAt: -1 })
                         .toArray()) as PollDoc[];
                     const polls = pollsRaw.map((p) => ({
@@ -90,30 +116,35 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
             // Heartbeat to keep connection alive
             const heartbeat = setInterval(() => {
                 send({ type: 'ping' });
-            }, 15000);
+            }, HEARTBEAT_INTERVAL_MS);
 
             // Presence updates and cleanup
             // Global map for owner-leave cleanup timers so multiple connections do not schedule duplicates
             const gg = globalThis as unknown as { __ownerCleanupTimers?: Map<string, NodeJS.Timeout> };
             const timers = (gg.__ownerCleanupTimers = gg.__ownerCleanupTimers || new Map<string, NodeJS.Timeout>());
-            const GRACE_MS = Number.isFinite(Number(process.env.OWNER_AWAY_GRACE_MS)) ? Number(process.env.OWNER_AWAY_GRACE_MS) : 5000;
+            const GRACE_MS = OWNER_AWAY_GRACE_MS;
             // (Removed periodic poll broadcast; now full-list events emitted on each mutation.)
+            // Track last write time per anonId (in-memory per server instance)
+            const gThrottle = globalThis as unknown as { __lastSeenWrites?: Map<string, number> };
+            const lastSeenMap = gThrottle.__lastSeenWrites = gThrottle.__lastSeenWrites || new Map<string, number>();
             const presence = setInterval(async () => {
                 try {
                     const db = await connectToDatabase();
-                    // Update this user's lastSeen
-                    await db
-                        .collection('users')
-                        .updateOne({ id: anonId, roomId }, { $set: { lastSeen: new Date() } });
+                    // Throttled lastSeen update
+                    const key = `${roomId}:${anonId}`;
+                    const now = Date.now();
+                    const last = lastSeenMap.get(key) || 0;
+                    if (now - last >= LAST_SEEN_WRITE_THROTTLE_MS) {
+                        await db.collection('users').updateOne({ id: anonId, roomId }, { $set: { lastSeen: new Date() } });
+                        lastSeenMap.set(key, now);
+                    }
 
-                    // Remove inactive users (>10s)
-                    const tenSecondsAgo = new Date(Date.now() - 10000);
-                    const delRes = await db
-                        .collection('users')
-                        .deleteMany({ roomId, lastSeen: { $lt: tenSecondsAgo } });
+                    // Remove inactive users older than STALE_USER_PRUNE_MS
+                    const staleCutoff = new Date(Date.now() - STALE_USER_PRUNE_MS);
+                    const delRes = await db.collection('users').deleteMany({ roomId, lastSeen: { $lt: staleCutoff } });
 
                     // Fetch fresh users and check room health
-                    const recentCutoff = new Date(Date.now() - 20000);
+                    const recentCutoff = new Date(Date.now() - RECENT_USER_WINDOW_MS);
                     const users = (await db.collection('users').find({ roomId, lastSeen: { $gte: recentCutoff } }).toArray()) as unknown as Array<{ id: string }>;
                     const room = (await db.collection('rooms').findOne({ _id: new ObjectId(roomId) })) as { ownerId?: string } | null;
                     const hasOwner = room ? users.some((u) => u.id === room.ownerId) : false;
@@ -121,12 +152,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
                     if (!room || users.length === 0) {
                         const existingTimer = timers.get(roomId);
                         if (existingTimer) { clearTimeout(existingTimer); timers.delete(roomId); }
-                        await db.collection('rooms').deleteOne({ _id: new ObjectId(roomId) });
-                        await db.collection('messages').deleteMany({ roomId });
-                        await db.collection('users').deleteMany({ roomId });
-                        await db.collection('polls').deleteMany({ roomId });
-                        await db.collection('votes').deleteMany({ roomId });
-                        roomEventBus.publish(roomId, { type: 'room-deleted', payload: { roomId } });
+                        await deleteRoom(roomId);
                         shutdown();
                         return;
                     }
@@ -134,15 +160,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
                     // If owner is absent, either delete immediately or schedule a short grace-period cleanup
                     if (!hasOwner) {
                         if (GRACE_MS <= 0) {
-                            // Immediate delete when owner away is requested
                             const existingTimer = timers.get(roomId);
                             if (existingTimer) { clearTimeout(existingTimer); timers.delete(roomId); }
-                            await db.collection('rooms').deleteOne({ _id: new ObjectId(roomId) });
-                            await db.collection('messages').deleteMany({ roomId });
-                            await db.collection('users').deleteMany({ roomId });
-                            await db.collection('polls').deleteMany({ roomId });
-                            await db.collection('votes').deleteMany({ roomId });
-                            roomEventBus.publish(roomId, { type: 'room-deleted', payload: { roomId } });
+                            await deleteRoom(roomId);
                             shutdown();
                             return;
                         }
@@ -154,12 +174,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
                                     const room2 = (await db2.collection('rooms').findOne({ _id: new ObjectId(roomId) })) as { ownerId?: string } | null;
                                     const hasOwner2 = room2 ? users2.some((u) => u.id === room2.ownerId) : false;
                                     if (!room2 || users2.length === 0 || !hasOwner2) {
-                                        await db2.collection('rooms').deleteOne({ _id: new ObjectId(roomId) });
-                                        await db2.collection('messages').deleteMany({ roomId });
-                                        await db2.collection('users').deleteMany({ roomId });
-                                        await db2.collection('polls').deleteMany({ roomId });
-                                        await db2.collection('votes').deleteMany({ roomId });
-                                        roomEventBus.publish(roomId, { type: 'room-deleted', payload: { roomId } });
+                                        await deleteRoom(roomId);
                                     }
                                 } finally {
                                     timers.delete(roomId);
@@ -180,7 +195,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
                 } catch {
                     // ignore
                 }
-            }, 5000);
+            }, PRESENCE_INTERVAL_MS);
 
             // Cleanup on close
             const shutdown = () => {
@@ -198,18 +213,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
                     try {
                         const db = await connectToDatabase();
                         await db.collection('users').deleteOne({ id: anonId, roomId });
-                        const tenSecondsAgo = new Date(Date.now() - 10000);
-                        await db.collection('users').deleteMany({ roomId, lastSeen: { $lt: tenSecondsAgo } });
+                        const staleCutoff = new Date(Date.now() - STALE_USER_PRUNE_MS);
+                        await db.collection('users').deleteMany({ roomId, lastSeen: { $lt: staleCutoff } });
                         const usersLeft = await db.collection('users').find({ roomId }).toArray();
                         const room = await db.collection('rooms').findOne({ _id: new ObjectId(roomId) });
                         if (!room) { shutdown(); return; }
                         if (usersLeft.length === 0) {
-                            await db.collection('rooms').deleteOne({ _id: new ObjectId(roomId) });
-                            await db.collection('messages').deleteMany({ roomId });
-                            await db.collection('polls').deleteMany({ roomId });
-                            await db.collection('votes').deleteMany({ roomId });
-                            await db.collection('users').deleteMany({ roomId });
-                            roomEventBus.publish(roomId, { type: 'room-deleted', payload: { roomId } });
+                            await deleteRoom(roomId);
                         } else {
                             roomEventBus.publish(roomId, { type: 'users', payload: usersLeft });
                         }

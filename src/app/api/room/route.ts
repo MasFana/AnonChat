@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
+import { RECENT_USER_WINDOW_MS } from '@/lib/constants';
 
 // POST /api/room → create room, assign first user as owner
 export async function POST(req: NextRequest) {
@@ -26,7 +27,7 @@ export async function POST(req: NextRequest) {
 export async function GET() {
     try {
         const db = await connectToDatabase();
-        const cutoff = new Date(Date.now() - 20000); // 20s recent activity window
+        const cutoff = new Date(Date.now() - RECENT_USER_WINDOW_MS);
         // Public rooms list pipeline
         const pipeline = [
             { $match: { isPublic: true } },

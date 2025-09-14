@@ -26,7 +26,7 @@ export async function immediatePollsReplace(roomId: string) {
         const db = await connectToDatabase();
         const pollsRaw = await db
             .collection('polls')
-            .find({ $or: [{ roomId }, { roomId: new ObjectId(roomId) }] })
+            .find({ roomId: new ObjectId(roomId) })
             .sort({ createdAt: -1 })
             .toArray();
         const polls = (pollsRaw as PollDoc[]).map((p) => ({
@@ -48,7 +48,7 @@ export function schedulePollsReplace(roomId: string) {
             const db = await connectToDatabase();
             const pollsRaw = await db
                 .collection('polls')
-                .find({ $or: [{ roomId }, { roomId: new ObjectId(roomId) }] })
+                .find({ roomId: new ObjectId(roomId) })
                 .sort({ createdAt: -1 })
                 .toArray();
             const polls = (pollsRaw as PollDoc[]).map((p) => ({
