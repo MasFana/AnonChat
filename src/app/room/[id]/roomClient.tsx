@@ -113,8 +113,8 @@ export default function RoomClient({ roomId }: { roomId: string }) {
         } catch { }
         if (cancelled) return;
         if (sseRef.current) { try { sseRef.current.close(); } catch { } sseRef.current = null; }
-  if (terminatedRef.current) return; // do not reconnect after termination
-  const es = new EventSource(`/api/room/${roomId}/sse?anonId=${id}`); sseRef.current = es;
+        if (terminatedRef.current) return; // do not reconnect after termination
+        const es = new EventSource(`/api/room/${roomId}/sse?anonId=${id}`); sseRef.current = es;
         const upsertPolls = (incoming: PollClient | PollClient[]) => {
           setPolls(prev => {
             const map = new Map<string, PollClient>(); prev.forEach(p => map.set(p._id, p));
