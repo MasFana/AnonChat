@@ -7,6 +7,23 @@ import { Button } from '@/components/ui/button';
 import { Users, MessageCircle, ChevronDown } from 'lucide-react';
 import Link from 'next/link';
 
+async function getOrCreateAnonId(): Promise<string | null> {
+  if (typeof window === 'undefined') return null;
+  const id = localStorage.getItem('anonId');
+  if (id && /^anon-[a-z0-9]{10}$/i.test(id)) return id;
+  try {
+    const res = await fetch('/api/anon', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json().catch(() => null) as { anonId?: string } | null;
+      if (data?.anonId && /^anon-[a-z0-9]{10}$/i.test(data.anonId)) {
+        localStorage.setItem('anonId', data.anonId);
+        return data.anonId;
+      }
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
 interface User { id: string; roomId: string; lastSeen: string; connectedAt: string }
 interface Message { id?: string; roomId: string; userId: string; content: string; createdAt: string }
 interface PollOptionClient { _id: string; text: string; votes: number }
@@ -28,7 +45,9 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   const [loading, setLoading] = useState(false);
   const sseRef = useRef<EventSource | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
-  const anonId = typeof window !== 'undefined' ? localStorage.getItem('anonId') : null;
+  // Start with null universally (SSR + first client render) to avoid hydration mismatch.
+  // We'll populate anonId after mount.
+  const [anonId, setAnonId] = useState<string | null>(null);
 
   const dedupedUsers = React.useMemo(() => {
     const seen = new Set<string>();
@@ -42,7 +61,14 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   }, [messages]);
 
   useEffect(() => {
-    if (!anonId) { router.replace('/?msg=missing-id'); return; }
+    let mounted = true;
+    const ensureIdAndStart = async () => {
+      let id = anonId;
+      if (!id) {
+        id = await getOrCreateAnonId();
+        if (mounted && id) setAnonId(id);
+      }
+      if (!id) return; // cannot proceed without id (very unlikely)
     let cancelled = false; let reconcileInterval: NodeJS.Timeout | null = null;
     const loadMetaAndConnect = async () => {
       try {
@@ -61,7 +87,7 @@ export default function RoomClient({ roomId }: { roomId: string }) {
       if (cancelled) return;
       // 2. Join (presence)
       try {
-        const res = await fetch(`/api/room/${roomId}/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ anonId }) });
+        const res = await fetch(`/api/room/${roomId}/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ anonId: id }) });
         if (res.ok) {
           const data = await res.json().catch(() => null);
           if (data && typeof data.ownerId === 'string') setOwner(data.ownerId);
@@ -69,7 +95,7 @@ export default function RoomClient({ roomId }: { roomId: string }) {
       } catch { }
       if (cancelled) return;
       if (sseRef.current) { try { sseRef.current.close(); } catch { } sseRef.current = null; }
-      const es = new EventSource(`/api/room/${roomId}/sse?anonId=${anonId}`); sseRef.current = es;
+      const es = new EventSource(`/api/room/${roomId}/sse?anonId=${id}`); sseRef.current = es;
       const upsertPolls = (incoming: PollClient | PollClient[]) => {
         setPolls(prev => {
           const map = new Map<string, PollClient>(); prev.forEach(p => map.set(p._id, p));
@@ -111,7 +137,7 @@ export default function RoomClient({ roomId }: { roomId: string }) {
       es.addEventListener('vote-cast', (ev: MessageEvent) => {
         const { payload } = JSON.parse(ev.data);
         if (payload?.poll) upsertPolls(payload.poll);
-        if (payload?.anonId && payload?.pollId && payload?.optionId && payload.anonId === anonId) setMyVotes(prev => ({ ...prev, [payload.pollId]: payload.optionId }));
+        if (payload?.anonId && payload?.pollId && payload?.optionId && payload.anonId === id) setMyVotes(prev => ({ ...prev, [payload.pollId]: payload.optionId }));
       });
       es.addEventListener('room-deleted', () => { router.replace('/?msg=Room closed'); });
       reconcileInterval = setInterval(async () => {
@@ -120,10 +146,16 @@ export default function RoomClient({ roomId }: { roomId: string }) {
     };
     loadMetaAndConnect();
     return () => { cancelled = true; if (reconcileInterval) clearInterval(reconcileInterval); if (sseRef.current) { try { sseRef.current.close(); } catch { } sseRef.current = null; } };
-  }, [roomId, anonId, router]);
+    };
+    ensureIdAndStart();
+    return () => { mounted = false; };
+    // We intentionally exclude anonId so that establishing the SSE connection
+    // happens only once per room mount; anonId is resolved inside the effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, router]);
 
   const sendMessage = async (e: React.FormEvent) => {
-    e.preventDefault(); if (!content.trim()) return; setLoading(true);
+    e.preventDefault(); if (!content.trim() || !anonId) return; setLoading(true);
     await fetch(`/api/room/${roomId}/message`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ anonId, content }) });
     setContent(''); setLoading(false);
   };
@@ -249,8 +281,8 @@ export default function RoomClient({ roomId }: { roomId: string }) {
               })}
             </div>
             <form onSubmit={sendMessage} className="flex gap-2 mt-auto pt-2 border-t border-border">
-              <Input className="flex-1 text-lg py-6" value={content} onChange={(e) => setContent(e.target.value)} placeholder="Type a message..." disabled={loading} required />
-              <Button type="submit" className="font-semibold text-lg py-6" disabled={loading}>{loading ? <span className="animate-spin mr-2">⏳</span> : null}Send</Button>
+              <Input className="flex-1 text-lg py-6" value={content} onChange={(e) => setContent(e.target.value)} placeholder={anonId ? "Type a message..." : "Initializing..."} disabled={loading || !anonId} required />
+              <Button type="submit" className="font-semibold text-lg py-6" disabled={loading || !anonId}>{loading ? <span className="animate-spin mr-2">⏳</span> : null}Send</Button>
             </form>
           </CardContent>
         </Card>

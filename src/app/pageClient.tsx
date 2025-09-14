@@ -4,7 +4,26 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
-function randomAnonId() { return "anon-" + Math.random().toString(36).slice(2, 8); }
+// Removed local randomAnonId generator; now always generated server-side.
+async function ensureAnonId(): Promise<string> {
+    if (typeof window === 'undefined') return '';
+    const existing = localStorage.getItem('anonId');
+    if (existing && /^anon-[a-z0-9]{10}$/i.test(existing)) return existing;
+    try {
+        const res = await fetch('/api/anon', { cache: 'no-store' });
+        if (res.ok) {
+            const data = await res.json().catch(() => null) as { anonId?: string } | null;
+            if (data?.anonId && /^anon-[a-z0-9]{10}$/i.test(data.anonId)) {
+                localStorage.setItem('anonId', data.anonId);
+                return data.anonId;
+            }
+        }
+    } catch { /* ignore */ }
+    // Fallback (should be rare) – minimal client generation if server failed
+    const fallback = 'anon-' + Math.random().toString(36).slice(2, 12).replace(/[^a-z0-9]/gi, 'a').slice(0,10);
+    localStorage.setItem('anonId', fallback);
+    return fallback;
+}
 
 type RoomListItem = { id: string; createdAt: string; userCount: number; hasOwner: boolean };
 type RoomsStats = { totalRooms: number; activeUsers: number; ownersOnline: number };
@@ -24,7 +43,8 @@ export default function HomeClient({ initialMsg }: { initialMsg: string | null }
         if (urlMsg) setMsg(urlMsg);
     }, [searchParams]);
 
-    useEffect(() => { if (typeof window !== "undefined" && !localStorage.getItem("anonId")) localStorage.setItem("anonId", randomAnonId()); }, []);
+    // Ensure an anon id exists (server-side generation) once on mount
+    useEffect(() => { ensureAnonId(); }, []);
 
     const loadRooms = async () => {
         setRoomsLoading(true);
@@ -43,14 +63,14 @@ export default function HomeClient({ initialMsg }: { initialMsg: string | null }
     useEffect(() => { loadRooms(); const t = setInterval(loadRooms, 10000); return () => clearInterval(t); }, []);
 
     const handleCreate = async () => {
-        setLoading(true); const anonId = localStorage.getItem("anonId");
+        setLoading(true); const anonId = localStorage.getItem("anonId") || await ensureAnonId();
         const res = await fetch("/api/room", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ anonId }) });
         const data = await res.json(); setLoading(false); if (data.roomId) router.push(`/room/${data.roomId}`);
     };
 
     const handleJoin = async (e: React.FormEvent) => {
         e.preventDefault(); const trimmed = roomId.trim(); if (trimmed.length < 3) return; setLoading(true);
-        const anonId = localStorage.getItem("anonId");
+        const anonId = localStorage.getItem("anonId") || await ensureAnonId();
         const res = await fetch(`/api/room/${trimmed}/join`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ anonId }) });
         const data = await res.json(); setLoading(false);
         if (data.joined) router.push(`/room/${trimmed}`); else setMsg(data.error || "Failed to join room");
