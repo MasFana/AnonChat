@@ -149,14 +149,19 @@ export default function RoomClient({ roomId }: { roomId: string }) {
             const msgId = payload.id || payload.createdAt;
             if (msgId && lastNotifiedMessageIdRef.current === msgId) return; // de-dupe
             if (msgId) lastNotifiedMessageIdRef.current = msgId;
-            const n = new Notification((payload.content || '').slice(0, 140) || 'New message', {
-              body: payload.userId + '@' + roomId,
+            const n = new Notification((payload.content || '').slice(0, 160) || 'New message', {
               tag: msgId || `${roomId}-latest`, // tag collapses duplicates
             });
-            // Auto-close after 5 seconds (best-effort; some browsers may ignore)
-            setTimeout(() => {
+
+            const closeTimer = setTimeout(() => {
               try { n.close(); } catch { /* ignore */ }
             }, 5000);
+
+            n.onclick = () => {
+              try { window.focus(); } catch { /* ignore */ }
+              try { clearTimeout(closeTimer); } catch { /* ignore */ }
+              try { n.close(); } catch { /* ignore */ }
+            };
           } catch { /* swallow notification errors */ }
         });
         es.addEventListener('poll-created', (ev: MessageEvent) => { const { payload } = JSON.parse(ev.data); upsertPolls(payload); });
