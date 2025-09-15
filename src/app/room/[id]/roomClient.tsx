@@ -160,7 +160,6 @@ export default function RoomClient({ roomId }: { roomId: string }) {
             n.onclick = () => {
               try { window.focus(); } catch { /* ignore */ }
               try { clearTimeout(closeTimer); } catch { /* ignore */ }
-              try { n.close(); } catch { /* ignore */ }
             };
           } catch { /* swallow notification errors */ }
         });
