@@ -81,21 +81,23 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
     // Attempt atomic delete; treat missing as already-deleted (idempotent behavior)
     const res = await db.collection('polls').findOneAndDelete({ _id: new ObjectId(pollId), roomId: new ObjectId(roomId) });
     if (!res || !res.value) {
-        // Already deleted: still emit deletion + refreshed list so late-joining clients sync
+        /**
+         * Poll already deleted (race / idempotent repeat). Previously we skipped vote cleanup here
+         * causing orphan votes. Now we always delete votes regardless of whether poll doc existed.
+         */
+        await db.collection('votes').deleteMany({ pollId });
         roomEventBus.publish(roomId, { type: 'poll-deleted', payload: { _id: pollId, already: true } });
         await immediatePollsReplace(roomId);
         schedulePollsReplace(roomId);
-        return NextResponse.json({ ok: true, alreadyDeleted: true });
-    } else {
-        // Clean up votes only after confirming poll existed
-        await db.collection('votes').deleteMany({ pollId });
-        roomEventBus.publish(roomId, { type: 'poll-deleted', payload: { _id: pollId } });
-        // Immediately broadcast authoritative list so non-owners update instantly
-        await immediatePollsReplace(roomId);
-        // Also schedule (will noop if rapid further changes get batched)
-        schedulePollsReplace(roomId);
-        return NextResponse.json({ ok: true, deleted: true });
+        return NextResponse.json({ ok: true, alreadyDeleted: true, votesPurged: true });
     }
+
+    // Poll existed: perform standard cleanup
+    await db.collection('votes').deleteMany({ pollId });
+    roomEventBus.publish(roomId, { type: 'poll-deleted', payload: { _id: pollId } });
+    await immediatePollsReplace(roomId);
+    schedulePollsReplace(roomId);
+    return NextResponse.json({ ok: true, deleted: true, votesPurged: true });
 }
 
 // POST /api/room/[id]/poll/[pollId] -> vote

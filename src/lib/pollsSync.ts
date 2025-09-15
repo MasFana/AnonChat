@@ -32,6 +32,7 @@ export async function immediatePollsReplace(roomId: string) {
         const polls = (pollsRaw as PollDoc[]).map((p) => ({
             ...p,
             _id: p._id.toString(),
+            roomId: typeof p.roomId === 'string' ? p.roomId : p.roomId.toString(),
             options: (p.options || []).map((o) => ({ ...o, _id: o._id.toString() })),
         }));
         const version = bump(roomId);
@@ -54,6 +55,7 @@ export function schedulePollsReplace(roomId: string) {
             const polls = (pollsRaw as PollDoc[]).map((p) => ({
                 ...p,
                 _id: p._id.toString(),
+                roomId: typeof p.roomId === 'string' ? p.roomId : p.roomId.toString(),
                 options: (p.options || []).map((o) => ({ ...o, _id: o._id.toString() })),
             }));
             const version = bump(roomId);

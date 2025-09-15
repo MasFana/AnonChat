@@ -20,8 +20,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     if (room.ownerId !== anonId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
     const now = new Date();
+    // Persist roomId as ObjectId for consistency with queries
     const pollDoc = {
-        roomId,
+        roomId: new ObjectId(roomId),
         question,
         options: options.map((text: string) => ({ _id: new ObjectId(), text, votes: 0 })),
         active: true,
@@ -33,6 +34,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const plain = {
         ...poll,
         _id: poll._id.toString(),
+        roomId: roomId, // ensure serialized roomId string in payload for client
         options: poll.options.map((o) => ({ ...o, _id: o._id.toString() })),
     };
     roomEventBus.publish(roomId, { type: 'poll-created', payload: plain });

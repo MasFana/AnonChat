@@ -133,6 +133,9 @@ Visit 👉 [http://localhost:3000](http://localhost:3000)
 # Migrate legacy string roomId fields to ObjectId (run once after upgrade)
 node scripts/migrate-roomid-objectid.ts
 
+# Migrate legacy poll documents whose roomId is still a string
+node scripts/migrate-polls-roomid-objectid.ts
+
 # Create / ensure indexes (idempotent)
 node scripts/create-indexes.ts
 
@@ -144,6 +147,7 @@ PowerShell example:
 
 ```
 $env:MONGODB_URI="mongodb://127.0.0.1:27017/anonchat"; node scripts/create-indexes.ts
+$env:MONGODB_URI="mongodb://127.0.0.1:27017/anonchat"; node scripts/migrate-polls-roomid-objectid.ts
 ```
 
 ---
