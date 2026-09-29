@@ -1,81 +1,43 @@
 "use client";
 import React, { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
-// Removed local randomAnonId generator; now always generated server-side.
-async function ensureAnonId(): Promise<string> {
-    if (typeof window === 'undefined') return '';
-    const existing = localStorage.getItem('anonId');
-    if (existing && /^anon-[a-z0-9]{10}$/i.test(existing)) return existing;
-    try {
-        const res = await fetch('/api/anon', { cache: 'no-store' });
-        if (res.ok) {
-            const data = await res.json().catch(() => null) as { anonId?: string } | null;
-            if (data?.anonId && /^anon-[a-z0-9]{10}$/i.test(data.anonId)) {
-                localStorage.setItem('anonId', data.anonId);
-                return data.anonId;
-            }
-        }
-    } catch { /* ignore */ }
-    // Fallback (should be rare) – minimal client generation if server failed
-    const fallback = 'anon-' + Math.random().toString(36).slice(2, 12).replace(/[^a-z0-9]/gi, 'a').slice(0,10);
-    localStorage.setItem('anonId', fallback);
-    return fallback;
-}
+import { anonId, api, capabilityKey, type RoomStats, type RoomSummary } from "@/lib/api";
+import RoomClient from "@/components/RoomClient";
 
-type RoomListItem = { id: string; createdAt: string; userCount: number; hasOwner: boolean };
-type RoomsStats = { totalRooms: number; activeUsers: number; ownersOnline: number };
-
-export default function HomeClient({ initialMsg }: { initialMsg: string | null }) {
+export default function HomeClient() {
     const router = useRouter();
-    const searchParams = useSearchParams();
     const [roomId, setRoomId] = useState("");
+    const pathRoomId = typeof window === "undefined" ? "" : /^\/room\/([^/]+)$/.exec(window.location.pathname)?.[1] || "";
     const [loading, setLoading] = useState(false);
-    const [rooms, setRooms] = useState<RoomListItem[]>([]);
+    const [rooms, setRooms] = useState<RoomSummary[]>([]);
     const [roomsLoading, setRoomsLoading] = useState(false);
-    const [stats, setStats] = useState<RoomsStats | null>(null);
-    const [msg, setMsg] = useState(initialMsg || "");
-
-    useEffect(() => {
-        const urlMsg = searchParams.get("msg");
-        if (urlMsg) setMsg(urlMsg);
-    }, [searchParams]);
+    const [stats, setStats] = useState<RoomStats | null>(null);
+    const [msg, setMsg] = useState("");
 
     // Ensure an anon id exists (server-side generation) once on mount
-    useEffect(() => { ensureAnonId(); }, []);
+    useEffect(() => { anonId().catch(() => setMsg("Cannot establish anonymous identity.")); }, []);
 
     const loadRooms = async () => {
         setRoomsLoading(true);
         try {
-            const res = await fetch('/api/room'); const data = await res.json();
-            const list: RoomListItem[] = (Array.isArray(data.rooms) ? data.rooms : []).map((r: { id: string; createdAt: string | Date; userCount: number; hasOwner: boolean }) => ({
-                id: r.id,
-                createdAt: typeof r.createdAt === 'string' ? r.createdAt : new Date(r.createdAt).toISOString(),
-                userCount: r.userCount,
-                hasOwner: r.hasOwner,
-            }));
-            setRooms(list);
-            if (data.stats && typeof data.stats === 'object') setStats(data.stats as RoomsStats);
-        } catch (e) { console.error('Failed to load rooms', e); } finally { setRoomsLoading(false); }
+            const data = await api.rooms(); setRooms(data.rooms); setStats(data.stats);
+        } catch { setMsg("Cannot load rooms."); } finally { setRoomsLoading(false); }
     };
     useEffect(() => { loadRooms(); const t = setInterval(loadRooms, 10000); return () => clearInterval(t); }, []);
 
     const handleCreate = async () => {
-        setLoading(true); const anonId = localStorage.getItem("anonId") || await ensureAnonId();
-        const res = await fetch("/api/room", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ anonId }) });
-        const data = await res.json(); setLoading(false); if (data.roomId) router.push(`/room/${data.roomId}`);
+        setLoading(true); try { const id = await anonId(); const data = await api.createRoom(id); sessionStorage.setItem(capabilityKey(data.roomId), data.ownerCapability); router.push(`/room/${data.roomId}`); } catch (error) { setMsg(error instanceof Error ? error.message : "Cannot create room."); } finally { setLoading(false); }
     };
 
-    const handleJoin = async (e: React.FormEvent) => {
         e.preventDefault(); const trimmed = roomId.trim(); if (trimmed.length < 3) return; setLoading(true);
-        const anonId = localStorage.getItem("anonId") || await ensureAnonId();
-        const res = await fetch(`/api/room/${trimmed}/join`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ anonId }) });
-        const data = await res.json(); setLoading(false);
+        try { await api.join(trimmed, await anonId()); router.push(`/room/${trimmed}`); } catch (error) { setMsg(error instanceof Error ? error.message : "Cannot join room."); } finally { setLoading(false); }
         if (data.joined) router.push(`/room/${trimmed}`); else setMsg(data.error || "Failed to join room");
     };
 
+    if (pathRoomId) return <RoomClient roomId={pathRoomId} />;
     return (
         <div className="min-h-screen bg-gradient-to-b from-neutral-900 to-neutral-950 text-foreground flex flex-col justify-between">
             <div>
@@ -153,7 +115,7 @@ export default function HomeClient({ initialMsg }: { initialMsg: string | null }
     );
 }
 
-function HeroStats({ rooms, stats }: { rooms: RoomListItem[]; stats: RoomsStats | null }) {
+function HeroStats({ rooms, stats }: { rooms: RoomSummary[]; stats: RoomStats | null }) {
     // Fallback to public counts if global stats missing (should rarely happen)
     const fallbackUsers = rooms.reduce((a, r) => a + (r.userCount || 0), 0);
     const fallbackOwnersOnline = rooms.filter(r => r.hasOwner).length;
