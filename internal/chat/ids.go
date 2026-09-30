@@ -3,7 +3,6 @@ package chat
 import (
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"io"
 )
 
@@ -16,22 +15,20 @@ func randomID() (string, error) {
 }
 
 func newAnonID() (string, error) {
-	result := make([]byte, 16)
-	if _, err := io.ReadFull(rand.Reader, result); err != nil {
-		return "", err
+	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+	encoded := make([]byte, 10)
+	for index := range encoded {
+		for {
+			var value [1]byte
+			if _, err := io.ReadFull(rand.Reader, value[:]); err != nil {
+				return "", err
+			}
+			if value[0] < 252 { // 252 is divisible by len(alphabet).
+				encoded[index] = alphabet[int(value[0])%len(alphabet)]
+				break
+			}
+		}
 	}
-	result[6] = (result[6] & 0x0f) | 0x40
-	result[8] = (result[8] & 0x3f) | 0x80
-	encoded := make([]byte, 36)
-	hex.Encode(encoded[0:8], result[0:4])
-	encoded[8] = '-'
-	hex.Encode(encoded[9:13], result[4:6])
-	encoded[13] = '-'
-	hex.Encode(encoded[14:18], result[6:8])
-	encoded[18] = '-'
-	hex.Encode(encoded[19:23], result[8:10])
-	encoded[23] = '-'
-	hex.Encode(encoded[24:36], result[10:16])
 	return "anon-" + string(encoded), nil
 }
 

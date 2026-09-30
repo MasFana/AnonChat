@@ -558,6 +558,21 @@ func TestSSESnapshotReplayHeadersAndTerminalEvent(t *testing.T) {
 	cancel()
 }
 
+func TestGeneratedAnonIDPassesRoomValidation(t *testing.T) {
+	app := testApp()
+	defer app.Shutdown(context.Background())
+	server := httptest.NewServer(app)
+	defer server.Close()
+	response, identity := requestJSON(t, server.Client(), http.MethodGet, server.URL+"/api/anon", nil)
+	if response.StatusCode != http.StatusOK || !validateAnonID(identity["anonId"].(string)) {
+		t.Fatalf("invalid generated identity: %d %v", response.StatusCode, identity)
+	}
+	response, _ = requestJSON(t, server.Client(), http.MethodPost, server.URL+"/api/room", map[string]string{"anonId": identity["anonId"].(string)})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("generated identity rejected by room create: %d", response.StatusCode)
+	}
+}
+
 func TestStaticAssetsFallbackAndAPIIsolation(t *testing.T) {
 	app := testApp()
 	defer app.Shutdown(context.Background())

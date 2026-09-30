@@ -21,17 +21,17 @@ type bucket struct {
 
 type rateLimiter struct {
 	// mu and entries retain test/debug visibility; request state lives in shards.
-	mu      sync.Mutex
-	entries map[string]bucket
-	shards  [limiterShardCount]limiterShard
-	maxKeys int
-	count   atomic.Int64
+	mu          sync.Mutex
+	entries     map[string]bucket
+	shards      [limiterShardCount]limiterShard
+	maxKeys     int
+	count       atomic.Int64
+	nextCleanup atomic.Int64
 }
 
 type limiterShard struct {
-	mu          sync.Mutex
-	entries     map[string]bucket
-	lastCleanup time.Time
+	mu      sync.Mutex
+	entries map[string]bucket
 }
 
 func newRateLimiter(maxKeys int) *rateLimiter {
@@ -43,7 +43,7 @@ func newRateLimiter(maxKeys int) *rateLimiter {
 }
 
 func (l *rateLimiter) allow(key string, capacity int, interval time.Duration, now time.Time) bool {
-	l.cleanupExpired(now)
+	l.maybeCleanupExpired(now)
 	shard := &l.shards[limiterShardIndex(key)]
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
@@ -76,12 +76,17 @@ func (l *rateLimiter) allow(key string, capacity int, interval time.Duration, no
 	return true
 }
 
+func (l *rateLimiter) maybeCleanupExpired(now time.Time) {
+	next := l.nextCleanup.Load()
+	if now.UnixNano() < next || !l.nextCleanup.CompareAndSwap(next, now.Add(time.Minute).UnixNano()) {
+		return
+	}
+	l.cleanupExpired(now)
+}
+
 func (l *rateLimiter) cleanupExpired(now time.Time) {
 	for index := range l.shards {
 		shard := &l.shards[index]
-		if now.Sub(shard.lastCleanup) < time.Minute {
-			continue
-		}
 		shard.mu.Lock()
 		removed := 0
 		for existing, value := range shard.entries {
@@ -94,7 +99,6 @@ func (l *rateLimiter) cleanupExpired(now time.Time) {
 				}
 			}
 		}
-		shard.lastCleanup = now
 		shard.mu.Unlock()
 	}
 }
