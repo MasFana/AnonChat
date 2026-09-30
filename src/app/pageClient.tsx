@@ -1,6 +1,5 @@
 "use client";
 import React, { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
@@ -8,7 +7,6 @@ import { anonId, api, capabilityKey, type RoomStats, type RoomSummary } from "@/
 import RoomClient from "@/components/RoomClient";
 
 export default function HomeClient() {
-    const router = useRouter();
     const [roomId, setRoomId] = useState("");
     const pathRoomId = typeof window === "undefined" ? "" : /^\/room\/([^/]+)$/.exec(window.location.pathname)?.[1] || "";
     const [loading, setLoading] = useState(false);
@@ -18,23 +16,42 @@ export default function HomeClient() {
     const [msg, setMsg] = useState("");
 
     // Ensure an anon id exists (server-side generation) once on mount
-    useEffect(() => { anonId().catch(() => setMsg("Cannot establish anonymous identity.")); }, []);
+    useEffect(() => {
+        const notice = new URLSearchParams(window.location.search).get("msg");
+        if (notice) setMsg(notice);
+        anonId().catch(() => setMsg("Cannot establish anonymous identity."));
+    }, []);
 
+    const loadRoomsRequestId = React.useRef(0);
     const loadRooms = async () => {
+        const requestId = ++loadRoomsRequestId.current;
         setRoomsLoading(true);
         try {
-            const data = await api.rooms(); setRooms(data.rooms); setStats(data.stats);
-        } catch { setMsg("Cannot load rooms."); } finally { setRoomsLoading(false); }
+            const data = await api.rooms();
+            if (requestId !== loadRoomsRequestId.current) return; // a newer request already resolved
+            setRooms(data.rooms); setStats(data.stats);
+        } catch (error) {
+            if (requestId !== loadRoomsRequestId.current) return;
+            setMsg(error instanceof Error ? error.message : "Cannot load rooms.");
+        } finally {
+            if (requestId === loadRoomsRequestId.current) setRoomsLoading(false);
+        }
     };
-    useEffect(() => { loadRooms(); const t = setInterval(loadRooms, 10000); return () => clearInterval(t); }, []);
+    useEffect(() => {
+        const refresh = () => { if (document.visibilityState === "visible") void loadRooms(); };
+        void loadRooms();
+        const timer = setInterval(refresh, 10000);
+        document.addEventListener("visibilitychange", refresh);
+        return () => { clearInterval(timer); document.removeEventListener("visibilitychange", refresh); };
+    }, []);
 
     const handleCreate = async () => {
-        setLoading(true); try { const id = await anonId(); const data = await api.createRoom(id); sessionStorage.setItem(capabilityKey(data.roomId), data.ownerCapability); router.push(`/room/${data.roomId}`); } catch (error) { setMsg(error instanceof Error ? error.message : "Cannot create room."); } finally { setLoading(false); }
+        setLoading(true); try { const id = await anonId(); const data = await api.createRoom(id); sessionStorage.setItem(capabilityKey(data.roomId), data.ownerCapability); window.location.assign(`/room/${data.roomId}`); } catch (error) { setMsg(error instanceof Error ? error.message : "Cannot create room."); } finally { setLoading(false); }
     };
 
+    const handleJoin = async (e: React.FormEvent) => {
         e.preventDefault(); const trimmed = roomId.trim(); if (trimmed.length < 3) return; setLoading(true);
-        try { await api.join(trimmed, await anonId()); router.push(`/room/${trimmed}`); } catch (error) { setMsg(error instanceof Error ? error.message : "Cannot join room."); } finally { setLoading(false); }
-        if (data.joined) router.push(`/room/${trimmed}`); else setMsg(data.error || "Failed to join room");
+        try { await api.join(trimmed, await anonId()); window.location.assign(`/room/${trimmed}`); } catch (error) { setMsg(error instanceof Error ? error.message : "Cannot join room."); } finally { setLoading(false); }
     };
 
     if (pathRoomId) return <RoomClient roomId={pathRoomId} />;
@@ -89,7 +106,7 @@ export default function HomeClient() {
                         </div>
                         <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
                             {rooms.map((r) => (
-                                <button key={r.id} onClick={() => router.push(`/room/${r.id}`)} className="text-left group">
+                                <button key={r.id} onClick={() => window.location.assign(`/room/${r.id}`)} className="text-left group">
                                     <div className="rounded-xl border border-border/60 bg-card/70 p-4 hover:border-border/90 hover:bg-card transition-all shadow-[0_5px_25px_-5px_rgba(0,0,0,0.5)] hover:shadow-[0_10px_35px_-5px_rgba(0,0,0,0.6)]">
                                         <div className="flex items-center justify-between gap-2">
                                             <div className="font-medium truncate">Room {r.id}</div>
@@ -110,7 +127,7 @@ export default function HomeClient() {
                 </main>
             </div>
             <style jsx global>{`html { background: #1b1b1b; color-scheme: dark; } .animate-fade-in { animation: fadeIn 0.7s; } @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }`}</style>
-            <footer className="max-w-6xl mx-auto px-4 py-10 text-center text-muted-foreground text-sm">Built with Next.js · MongoDB · SSE ❤️ <a href="https://github.com/MasFana" className="underline hover:text-foreground">MasFana</a></footer>
+            <footer className="max-w-6xl mx-auto px-4 py-10 text-center text-muted-foreground text-sm">Static web client · SSE <a href="https://github.com/MasFana" className="underline hover:text-foreground">MasFana</a></footer>
         </div>
     );
 }
