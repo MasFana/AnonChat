@@ -1,5 +1,7 @@
 # AnonChat
 
+![AnonChat homepage](docs/migration/ui-baseline/homepage-before.png)
+
 Anonymous chat and live-poll app. One Go process serves embedded static Next.js export plus same-origin HTTP/SSE API.
 
 Room state, messages, polls, identities, and SSE connections live only in process memory. Restart deletes all room state. No database, MongoDB, WebSocket, persistence, external cache, or event bus exists. Run exactly one backend replica; horizontal scaling is unsupported.
@@ -120,6 +122,16 @@ $env:RATE_LIMIT_MULTIPLIER='1'
 
 `ADDR=127.0.0.1:8000` prevents direct LAN/Internet access. Keep `cloudflared` separate. Do not publicly expose `/debug/pprof/`, `/metrics`, `/healthz`, or `/readyz` without access policy.
 
+### Podman origin with host cloudflared
+
+When `cloudflared` runs on host and AnonChat runs in Podman's default `podman` bridge network, publish container port only on host loopback and run binary in container with:
+
+```bash
+ADDR='0.0.0.0:8000' TRUSTED_PROXY_CIDRS='10.88.0.1/32' PPROF_TOKEN='' RATE_LIMIT_MULTIPLIER='1' ./anonchat
+```
+
+`10.88.0.1` is default Podman bridge gateway. Confirm custom network gateway with `podman network inspect <network>` and replace value. Cloudflare Tunnel Service URL is `http://127.0.0.1:8000`. Do not trust `0.0.0.0/0` or publish `8000` on every host interface.
+
 `SIGTERM` and `Ctrl+C` mark server unready, drain work, then exit. All state remains lost after stop/restart.
 
 ## Configuration
@@ -214,6 +226,18 @@ Open room in two browsers/devices. Messages and presence must update live. SSE i
 Optional: protect hostname with Cloudflare Access. Test room creation, join, messages, polls, and live SSE after policy changes.
 
 References: [Cloudflare dashboard tunnel guide](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/create-remote-tunnel/) and [cloudflared downloads](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
+
+## Screenshots
+
+Captured UI baseline before static conversion. Details and known limits: [`docs/migration/ui-baseline/README.md`](docs/migration/ui-baseline/README.md).
+
+### Room owner
+
+![Room owner](docs/migration/ui-baseline/room-owner-before.png)
+
+### Room participant
+
+![Room participant](docs/migration/ui-baseline/room-participant-before.png)
 
 ## Operations
 
