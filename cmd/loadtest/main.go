@@ -29,14 +29,27 @@ type room struct{ id, anon string }
 
 func main() {
 	base := flag.String("base", "http://127.0.0.1:8080", "server URL")
-	mode := flag.String("mode", "fanout", "fanout, rooms, churn")
+	mode := flag.String("mode", "fanout", "fanout, rooms, churn, realistic")
 	clients := flag.Int("clients", 31, "non-owner SSE clients")
 	rooms := flag.Int("rooms", 100, "rooms")
 	rate := flag.Int("rate", 20, "messages or connects per second")
 	duration := flag.Duration("duration", 10*time.Second, "run duration")
+	realistic := realisticFlags{}
+	realistic.bind()
 	flag.Parse()
+	realistic.duration = time.Minute
+	flag.Visit(func(item *flag.Flag) {
+		if item.Name == "duration" {
+			realistic.duration = *duration
+		}
+	})
+	realistic.base = *base
 	if *clients < 0 || *rooms < 1 || *rate < 1 || *duration <= 0 {
 		panic("clients >= 0, rooms/rate > 0, duration > 0 required")
+	}
+	if *mode == "realistic" {
+		runRealistic(*base, realistic)
+		return
 	}
 	r := &result{}
 	client := &http.Client{Transport: &http.Transport{MaxIdleConns: 10000, MaxIdleConnsPerHost: 10000}, Timeout: 10 * time.Second}
@@ -52,7 +65,7 @@ func main() {
 	case "churn":
 		churn(ctx, client, *base, *rate, *duration, r)
 	default:
-		panic("-mode must be fanout, rooms, or churn")
+		panic("-mode must be fanout, rooms, churn, or realistic")
 	}
 	report(r)
 }

@@ -71,3 +71,41 @@ go test -race ./...
 ```
 
 For frontend changes, build the static export into `web/dist` before rebuilding the Go binary.
+
+## Realistic load benchmark
+
+Run server and load generator from separate machines when possible. Same host mixes server and generator CPU, RAM, network, and scheduler cost.
+
+Required server environment:
+
+```powershell
+$env:MAX_SUBSCRIBERS_PER_ROOM=100
+$env:MAX_USERS_PER_ROOM=100
+$env:MAX_MESSAGE_BYTES=65536
+$env:MAX_REQUEST_BODY_BYTES=131072
+$env:PPROF_TOKEN='local-benchmark-token'
+go build -o anonchat.exe ./cmd/server
+.\anonchat.exe
+```
+
+Capture metrics with `Invoke-WebRequest http://127.0.0.1:8080/metrics`. Pprof needs loopback plus bearer token: `Invoke-WebRequest -Headers @{Authorization='Bearer local-benchmark-token'} http://127.0.0.1:8080/debug/pprof/heap?debug=1`. Current global/IP (200/minute) and IP/room (100/minute) rate limits can reject setup or high-rate traffic when callers share one IP.
+
+Normal traffic:
+
+```powershell
+go run ./cmd/loadtest -mode realistic -rooms 10 -participants 50 -messages-per-room-per-second 1 -message-bytes 500 -duration 5m -server-pid <PID>
+```
+
+Source-code sharing:
+
+```powershell
+go run ./cmd/loadtest -mode realistic -rooms 10 -participants 50 -messages-per-room-per-second 1 -message-bytes 500 -source-message-bytes 32768 -source-message-every 60 -duration 5m -server-pid <PID>
+```
+
+Per-user stress:
+
+```powershell
+go run ./cmd/loadtest -mode realistic -rooms 10 -participants 50 -sender-mode all -messages-per-room-per-second 1 -message-bytes 500 -duration 1m -server-pid <PID>
+```
+
+Output uses stable `key=value` lines. It is measurement from one run, not capacity guarantee. Windows `-server-pid` sampling uses `Get-Process`; unsupported systems print `server_resource_sampling=unsupported`.
