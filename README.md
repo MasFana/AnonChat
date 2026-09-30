@@ -34,12 +34,12 @@ All limits are validated against deployment ceilings at startup. Defaults:
 | `MAX_USERS_PER_ROOM`         |     1000 |
 | `MAX_MESSAGES_PER_ROOM`      |     1000 |
 | `MAX_EVENT_RING`             |      256 |
-| `MAX_SUBSCRIBERS_PER_ROOM`   |       32 |
+| `MAX_SUBSCRIBERS_PER_ROOM`   |      100 |
 | `MAX_SUBSCRIPTIONS_PER_USER` |        4 |
 | `MAX_SSE_QUEUE_FRAMES`       |       32 |
 | `MAX_ROOM_COMMAND_QUEUE`     |      256 |
-| `MAX_MESSAGE_BYTES`          |     1000 |
-| `MAX_REQUEST_BODY_BYTES`     |     8192 |
+| `MAX_MESSAGE_BYTES`          |    65536 |
+| `MAX_REQUEST_BODY_BYTES`     |   131072 |
 | `MAX_POLL_OPTIONS`           |        8 |
 | `OWNER_AWAY_GRACE_MS`        |     5000 |
 | `HEARTBEAT_INTERVAL_MS`      |    15000 |

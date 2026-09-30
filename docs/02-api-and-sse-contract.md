@@ -10,7 +10,7 @@ This document is sole public HTTP/SSE definition. JSON errors use `{"error":"<st
 | `POST /api/room` | `{anonId}` valid anon ID | `200 {roomId,ownerId,ownerCapability}` | `400 invalid_anon_id`; `429 rate_limited`; `503 capacity_exhausted` | none |
 | `GET /api/room` | none | `200 {rooms:[{id,createdAt,userCount,hasOwner}],stats:{totalRooms,activeUsers,ownersOnline}}` | `503 unavailable` | none |
 | `POST /api/room/:id/join` | `{anonId}`, valid, <=64 bytes | `200 {joined:true,ownerId}` | `400 invalid_anon_id`; `404 room_not_found`; `410 room_closed`; `429 rate_limited` or `room_full`; `503 overloaded` | `users` on new user/presence change |
-| `POST /api/room/:id/message` | `{anonId,content}`; valid ID; trimmed nonempty UTF-8 <=1000 bytes | `200 {sent:true,id}` | `400 invalid_message`; room errors; `429 rate_limited`; `503 overloaded` | `message` |
+| `POST /api/room/:id/message` | `{anonId,content}`; valid ID; trimmed nonempty UTF-8 <=65536 bytes | `200 {sent:true,id}` | `400 invalid_message`; room errors; `429 rate_limited`; `503 overloaded` | `message` |
 | `GET /api/room/:id/meta` | none | `200 {ownerId,isPublic,createdAt}` | `404 room_not_found`; `410 room_closed` | none |
 | `PATCH /api/room/:id/visibility` | `{anonId,ownerCapability,isPublic:boolean}`; owner capability | `200 {ok:true,isPublic}` | `400 invalid_payload`; `403 forbidden`; room errors | `room-visibility` |
 | `POST /api/room/:id/poll` | `{anonId,ownerCapability,question,options}`; owner capability; 2..8 nonempty options; bounded strings | `200 {pollId}` | `400 invalid_poll`; `403 forbidden`; `409 poll_active`; room errors | `poll` |

@@ -6,7 +6,7 @@ Defaults and entity limits are in `01`; validate before allocation. Local token 
 
 ## Capacity model
 
-Initial planning shape: 1,000 rooms; 1,000 users max/room; 1,000 messages � <=1,000 bytes; 256 encoded event frames; 32 subscribers � 32 frames; four connections per anon ID with one slot reserved for the owner; one poll with <=1,000 vote entries. Actual heap includes maps, strings, encoded frames, goroutine stacks, JSON, and runtime overhead. Do not publish capacity guarantee. Benchmark on deployment hardware, choose container memory with headroom, set `GOMEMLIMIT` below cgroup limit, and reject before saturation.
+Initial planning shape: 1,000 rooms; 1,000 users max/room; 1,000 messages � <=65,536 bytes; 256 encoded event frames; 100 subscribers � 32 frames; four connections per anon ID with one slot reserved for the owner; one poll with <=1,000 vote entries. Actual heap includes maps, strings, encoded frames, goroutine stacks, JSON, and runtime overhead. Do not publish capacity guarantee. Benchmark on deployment hardware, choose container memory with headroom, set `GOMEMLIMIT` below cgroup limit, and reject before saturation.
 
 ## Performance tradeoff and gates
 

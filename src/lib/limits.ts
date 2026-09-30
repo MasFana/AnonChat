@@ -1,6 +1,6 @@
 export const limits = {
-  messageBytes: 1000,
-  requestBytes: 8192,
+  messageBytes: 64 * 1024,
+  requestBytes: 128 * 1024,
   pollOptions: 8,
   pollQuestionBytes: 256,
   pollOptionBytes: 128,

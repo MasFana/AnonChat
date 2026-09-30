@@ -1054,6 +1054,26 @@ func TestBodyBoundsAndStrictAnonID(t *testing.T) {
 	}
 }
 
+func TestMessageByteLimit(t *testing.T) {
+	app := testApp()
+	defer app.Shutdown(context.Background())
+	server := httptest.NewServer(app)
+	defer server.Close()
+	roomID, owner, _, apiErr := app.rooms.create("anon-0123456789")
+	if apiErr != nil {
+		t.Fatal(apiErr)
+	}
+	content := strings.Repeat("x", app.config.Limits.MaxMessageBytes)
+	response, result := requestJSON(t, server.Client(), http.MethodPost, server.URL+"/api/room/"+roomID+"/message", map[string]string{"anonId": owner, "content": content})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("message at byte limit: %d %v", response.StatusCode, result)
+	}
+	response, result = requestJSON(t, server.Client(), http.MethodPost, server.URL+"/api/room/"+roomID+"/message", map[string]string{"anonId": owner, "content": content + "x"})
+	if response.StatusCode != http.StatusBadRequest || result["error"] != "invalid_message" {
+		t.Fatalf("message over byte limit: %d %v", response.StatusCode, result)
+	}
+}
+
 func TestOwnerCapabilityConstantTimeAuthorization(t *testing.T) {
 	app := testApp()
 	defer app.Shutdown(context.Background())

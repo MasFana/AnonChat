@@ -37,8 +37,8 @@ type Limits struct {
 func DefaultLimits() Limits {
 	return Limits{
 		MaxRooms: 1000, MaxUsersPerRoom: 1000, MaxMessagesPerRoom: 1000,
-		MaxEventRing: 256, MaxSubscribers: 32, MaxSubscriptionsPerUser: 4, MaxSSEQueueFrames: 32,
-		MaxCommandQueue: 256, MaxMessageBytes: 1000, MaxRequestBodyBytes: 8192,
+		MaxEventRing: 256, MaxSubscribers: 100, MaxSubscriptionsPerUser: 4, MaxSSEQueueFrames: 32,
+		MaxCommandQueue: 256, MaxMessageBytes: 64 * 1024, MaxRequestBodyBytes: 128 * 1024,
 		MaxPollOptions: 8, MaxRateLimitKeys: 10000, OwnerGrace: 5 * time.Second, HeartbeatInterval: 15 * time.Second,
 	}
 }
@@ -70,7 +70,7 @@ func LoadConfig() (Config, error) {
 		{"MAX_SUBSCRIPTIONS_PER_USER", &limits.MaxSubscriptionsPerUser, 1, 32},
 		{"MAX_SSE_QUEUE_FRAMES", &limits.MaxSSEQueueFrames, 1, 256},
 		{"MAX_ROOM_COMMAND_QUEUE", &limits.MaxCommandQueue, 1, 4096},
-		{"MAX_MESSAGE_BYTES", &limits.MaxMessageBytes, 1, 8192},
+		{"MAX_MESSAGE_BYTES", &limits.MaxMessageBytes, 1, 64 * 1024},
 		{"MAX_POLL_OPTIONS", &limits.MaxPollOptions, 2, 8},
 		{"MAX_RATE_LIMIT_KEYS", &limits.MaxRateLimitKeys, 100, 100000},
 	}
@@ -83,8 +83,8 @@ func LoadConfig() (Config, error) {
 	}
 	if value := os.Getenv("MAX_REQUEST_BODY_BYTES"); value != "" {
 		parsed, err := strconv.ParseInt(value, 10, 64)
-		if err != nil || parsed < 1024 || parsed > 65536 {
-			return Config{}, fmt.Errorf("MAX_REQUEST_BODY_BYTES must be between 1024 and 65536")
+		if err != nil || parsed < 1024 || parsed > 128*1024 {
+			return Config{}, fmt.Errorf("MAX_REQUEST_BODY_BYTES must be between 1024 and 131072")
 		}
 		limits.MaxRequestBodyBytes = parsed
 	}
