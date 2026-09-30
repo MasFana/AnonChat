@@ -580,7 +580,11 @@ func (a *App) decode(r *http.Request, target any) error {
 }
 
 func (a *App) allow(key string, capacity int) bool {
-	return a.limiter.allow(key, capacity, time.Minute, time.Now())
+	multiplier := a.config.RateLimitMultiplier
+	if multiplier < 1 {
+		multiplier = 1
+	}
+	return a.limiter.allow(key, capacity*multiplier, time.Minute, time.Now())
 }
 
 func (a *App) BeginDrain() { a.rooms.markDraining() }

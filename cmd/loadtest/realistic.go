@@ -26,7 +26,6 @@ type realisticFlags struct {
 }
 
 func (f *realisticFlags) bind() {
-	flag.IntVar(&f.rooms, "rooms", 10, "realistic: rooms")
 	flag.IntVar(&f.participants, "participants", 50, "realistic: participants per room including owner")
 	flag.IntVar(&f.rate, "messages-per-room-per-second", 1, "realistic: requested messages per room per second (per user for sender-mode all)")
 	flag.IntVar(&f.messageBytes, "message-bytes", 500, "realistic: normal message UTF-8 bytes")
@@ -143,6 +142,7 @@ func realisticSetup(ctx context.Context, client *http.Client, base string, f rea
 			return nil, err
 		}
 		people := []realisticParticipant{{rm.id, rm.anon}}
+		go realisticSSE(ctx, client, base, people[0], ready, r)
 		for p := 1; p < f.participants; p++ {
 			anon, err := realisticIdentity(ctx, client, base, r)
 			if err != nil {
@@ -152,9 +152,7 @@ func realisticSetup(ctx context.Context, client *http.Client, base string, f rea
 				return nil, err
 			}
 			people = append(people, realisticParticipant{rm.id, anon})
-		}
-		for _, person := range people {
-			go realisticSSE(ctx, client, base, person, ready, r)
+			go realisticSSE(ctx, client, base, people[len(people)-1], ready, r)
 		}
 		rooms = append(rooms, realisticRoom{rm.id, people})
 	}

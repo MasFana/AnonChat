@@ -37,8 +37,12 @@ func main() {
 	realistic := realisticFlags{}
 	realistic.bind()
 	flag.Parse()
+	realistic.rooms = 10
 	realistic.duration = time.Minute
 	flag.Visit(func(item *flag.Flag) {
+		if item.Name == "rooms" {
+			realistic.rooms = *rooms
+		}
 		if item.Name == "duration" {
 			realistic.duration = *duration
 		}

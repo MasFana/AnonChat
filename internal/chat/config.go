@@ -11,10 +11,11 @@ import (
 )
 
 type Config struct {
-	Address           string
-	Limits            Limits
-	TrustedProxyCIDRs []netip.Prefix
-	PprofToken        string
+	Address             string
+	Limits              Limits
+	TrustedProxyCIDRs   []netip.Prefix
+	PprofToken          string
+	RateLimitMultiplier int
 }
 
 type Limits struct {
@@ -102,7 +103,11 @@ func LoadConfig() (Config, error) {
 		}
 		limits.HeartbeatInterval = time.Duration(parsed) * time.Millisecond
 	}
-	return Config{Address: address, Limits: limits, TrustedProxyCIDRs: trustedProxies, PprofToken: os.Getenv("PPROF_TOKEN")}, nil
+	multiplier, err := envInt("BENCHMARK_RATE_LIMIT_MULTIPLIER", 1, 1, 1000)
+	if err != nil {
+		return Config{}, err
+	}
+	return Config{Address: address, Limits: limits, TrustedProxyCIDRs: trustedProxies, PprofToken: os.Getenv("PPROF_TOKEN"), RateLimitMultiplier: multiplier}, nil
 }
 
 func parseTrustedProxyCIDRs(value string) ([]netip.Prefix, error) {

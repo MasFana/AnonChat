@@ -84,11 +84,12 @@ $env:MAX_USERS_PER_ROOM=100
 $env:MAX_MESSAGE_BYTES=65536
 $env:MAX_REQUEST_BODY_BYTES=131072
 $env:PPROF_TOKEN='local-benchmark-token'
+$env:BENCHMARK_RATE_LIMIT_MULTIPLIER=100 # benchmark-only; keep 1 in production
 go build -o anonchat.exe ./cmd/server
 .\anonchat.exe
 ```
 
-Capture metrics with `Invoke-WebRequest http://127.0.0.1:8080/metrics`. Pprof needs loopback plus bearer token: `Invoke-WebRequest -Headers @{Authorization='Bearer local-benchmark-token'} http://127.0.0.1:8080/debug/pprof/heap?debug=1`. Current global/IP (200/minute) and IP/room (100/minute) rate limits can reject setup or high-rate traffic when callers share one IP.
+Capture metrics with `Invoke-WebRequest http://127.0.0.1:8080/metrics`. Pprof needs loopback plus bearer token: `Invoke-WebRequest -Headers @{Authorization='Bearer local-benchmark-token'} http://127.0.0.1:8080/debug/pprof/heap?debug=1`. Current global/IP (200/minute) and IP/room (100/minute) rate limits can reject setup or high-rate traffic when callers share one IP. `BENCHMARK_RATE_LIMIT_MULTIPLIER` multiplies every per-minute limiter capacity only for isolated benchmark servers; default `1` preserves production behavior.
 
 Normal traffic:
 
