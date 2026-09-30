@@ -32,12 +32,12 @@ Room state, messages, polls, identities, and SSE connections live only in proces
 go run ./cmd/server
 ```
 
-Open <http://127.0.0.1:8080>. Stop with `Ctrl+C`.
+Open <http://127.0.0.1:8000>. Stop with `Ctrl+C`.
 
 ```powershell
-Invoke-WebRequest http://127.0.0.1:8080/healthz
-Invoke-WebRequest http://127.0.0.1:8080/readyz
-Invoke-WebRequest http://127.0.0.1:8080/metrics
+Invoke-WebRequest http://127.0.0.1:8000/healthz
+Invoke-WebRequest http://127.0.0.1:8000/readyz
+Invoke-WebRequest http://127.0.0.1:8000/metrics
 ```
 
 ### Frontend work
@@ -112,24 +112,24 @@ Remove-Item Env:GOOS, Env:GOARCH
 Example Windows origin for same-host Cloudflare Tunnel:
 
 ```powershell
-$env:ADDR='127.0.0.1:8080'
+$env:ADDR='127.0.0.1:8000'
 $env:TRUSTED_PROXY_CIDRS='127.0.0.1/32,::1/128'
 $env:RATE_LIMIT_MULTIPLIER='1'
 .\anonchat.exe
 ```
 
-`ADDR=127.0.0.1:8080` prevents direct LAN/Internet access. Keep `cloudflared` separate. Do not publicly expose `/debug/pprof/`, `/metrics`, `/healthz`, or `/readyz` without access policy.
+`ADDR=127.0.0.1:8000` prevents direct LAN/Internet access. Keep `cloudflared` separate. Do not publicly expose `/debug/pprof/`, `/metrics`, `/healthz`, or `/readyz` without access policy.
 
 `SIGTERM` and `Ctrl+C` mark server unready, drain work, then exit. All state remains lost after stop/restart.
 
 ## Configuration
 
-Set OS process/service environment variables. Empty variable uses default except `ADDR`, default `:8080`.
+Set OS process/service environment variables. Empty variable uses deployment defaults. `PPROF_TOKEN` remains disabled when empty.
 
 | Variable | Default | Range / purpose |
 | --- | ---: | --- |
-| `ADDR` | `:8080` | Listener, example `127.0.0.1:8080` |
-| `TRUSTED_PROXY_CIDRS` | empty | Comma-separated direct proxy CIDRs |
+| `ADDR` | `127.0.0.1:8000` | Loopback listener |
+| `TRUSTED_PROXY_CIDRS` | `127.0.0.1/32,::1/128` | Comma-separated direct proxy CIDRs |
 | `PPROF_TOKEN` | disabled | Bearer token for loopback-only pprof |
 | `MAX_ROOMS` | 1000 | 1–10000 |
 | `MAX_USERS_PER_ROOM` | 1000 | 1–10000 |
@@ -176,7 +176,7 @@ Windows cloudflared does not auto-update. Update it regularly from official rele
 3. Choose **Cloudflared**, name tunnel, copy generated connector command containing token.
 4. Add route: **Published application**.
 5. Choose hostname, example `chat.example.com`.
-6. Set **Service URL** to `http://localhost:8080`.
+6. Set **Service URL** to `http://localhost:8000`.
 7. Save. Wait for tunnel status **Healthy**.
 
 Path routing does not strip path. Use root hostname; app needs `/api/*`, `/room/*`, and `/_next/*` unchanged.
@@ -186,7 +186,7 @@ Path routing does not strip path. Use root hostname; app needs `/api/*`, `/room/
 Terminal/service 1:
 
 ```powershell
-$env:ADDR='127.0.0.1:8080'
+$env:ADDR='127.0.0.1:8000'
 $env:TRUSTED_PROXY_CIDRS='127.0.0.1/32,::1/128'
 $env:RATE_LIMIT_MULTIPLIER='1'
 .\anonchat.exe
@@ -226,7 +226,7 @@ References: [Cloudflare dashboard tunnel guide](https://developers.cloudflare.co
 $env:PPROF_TOKEN='local-debug-token'
 go run ./cmd/server
 # Separate terminal:
-Invoke-WebRequest -Headers @{ Authorization = 'Bearer local-debug-token' } http://127.0.0.1:8080/debug/pprof/heap?debug=1
+Invoke-WebRequest -Headers @{ Authorization = 'Bearer local-debug-token' } http://127.0.0.1:8000/debug/pprof/heap?debug=1
 ```
 
 Never route pprof through Cloudflare Tunnel: forwarded headers intentionally disable it.

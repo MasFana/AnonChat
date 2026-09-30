@@ -28,7 +28,7 @@ type metricSample struct{ values map[string]uint64 }
 type room struct{ id, anon string }
 
 func main() {
-	base := flag.String("base", "http://127.0.0.1:8080", "server URL")
+	base := flag.String("base", "http://127.0.0.1:8000", "server URL")
 	mode := flag.String("mode", "fanout", "fanout, rooms, churn, realistic")
 	clients := flag.Int("clients", 31, "non-owner SSE clients")
 	rooms := flag.Int("rooms", 100, "rooms")

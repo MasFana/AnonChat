@@ -47,12 +47,16 @@ func DefaultLimits() Limits {
 func LoadConfig() (Config, error) {
 	address := os.Getenv("ADDR")
 	if address == "" {
-		address = ":8080"
+		address = "127.0.0.1:8000"
 	}
 	if _, _, err := net.SplitHostPort(address); err != nil {
 		return Config{}, fmt.Errorf("invalid ADDR: %w", err)
 	}
-	trustedProxies, err := parseTrustedProxyCIDRs(os.Getenv("TRUSTED_PROXY_CIDRS"))
+	trustedProxyCIDRs := os.Getenv("TRUSTED_PROXY_CIDRS")
+	if trustedProxyCIDRs == "" {
+		trustedProxyCIDRs = "127.0.0.1/32,::1/128"
+	}
+	trustedProxies, err := parseTrustedProxyCIDRs(trustedProxyCIDRs)
 	if err != nil {
 		return Config{}, err
 	}
