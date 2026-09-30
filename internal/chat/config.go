@@ -103,7 +103,7 @@ func LoadConfig() (Config, error) {
 		}
 		limits.HeartbeatInterval = time.Duration(parsed) * time.Millisecond
 	}
-	multiplier, err := envInt("BENCHMARK_RATE_LIMIT_MULTIPLIER", 1, 1, 1000)
+	multiplier, err := envInt("RATE_LIMIT_MULTIPLIER", 10, 1, 1000)
 	if err != nil {
 		return Config{}, err
 	}

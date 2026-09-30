@@ -41,6 +41,7 @@ All limits are validated against deployment ceilings at startup. Defaults:
 | `MAX_MESSAGE_BYTES`          |    65536 |
 | `MAX_REQUEST_BODY_BYTES`     |   131072 |
 | `MAX_POLL_OPTIONS`           |        8 |
+| `RATE_LIMIT_MULTIPLIER`      |       10 |
 | `OWNER_AWAY_GRACE_MS`        |     5000 |
 | `HEARTBEAT_INTERVAL_MS`      |    15000 |
 | `TRUSTED_PROXY_CIDRS`        |    empty |
@@ -48,7 +49,7 @@ All limits are validated against deployment ceilings at startup. Defaults:
 
 `TRUSTED_PROXY_CIDRS` is a comma-separated list of proxy networks. Forwarded client IPs are trusted only when the direct peer matches one of those CIDRs. `example.env` lists the supported settings. Anonymous participant IDs are not credentials; owner mutations require the separate owner capability returned by room creation.
 
-Unconnected join reservations expire after 30 seconds. Message and vote admission combines per-anonymous-ID limits with coarse limits of 200 requests per IP per minute globally and 100 requests per IP per room per minute, bounding caller-controlled limiter keys.
+Unconnected join reservations expire after 30 seconds. Message and vote admission combines per-anonymous-ID limits with coarse limits of 200 requests per IP per minute globally and 100 requests per IP per room per minute, each multiplied by `RATE_LIMIT_MULTIPLIER` (default `10`). Set it to `1` for stricter public-internet abuse protection.
 
 ## API
 
@@ -84,12 +85,12 @@ $env:MAX_USERS_PER_ROOM=100
 $env:MAX_MESSAGE_BYTES=65536
 $env:MAX_REQUEST_BODY_BYTES=131072
 $env:PPROF_TOKEN='local-benchmark-token'
-$env:BENCHMARK_RATE_LIMIT_MULTIPLIER=100 # benchmark-only; keep 1 in production
+$env:RATE_LIMIT_MULTIPLIER=100 # isolated benchmark server only
 go build -o anonchat.exe ./cmd/server
 .\anonchat.exe
 ```
 
-Capture metrics with `Invoke-WebRequest http://127.0.0.1:8080/metrics`. Pprof needs loopback plus bearer token: `Invoke-WebRequest -Headers @{Authorization='Bearer local-benchmark-token'} http://127.0.0.1:8080/debug/pprof/heap?debug=1`. Current global/IP (200/minute) and IP/room (100/minute) rate limits can reject setup or high-rate traffic when callers share one IP. `BENCHMARK_RATE_LIMIT_MULTIPLIER` multiplies every per-minute limiter capacity only for isolated benchmark servers; default `1` preserves production behavior.
+Capture metrics with `Invoke-WebRequest http://127.0.0.1:8080/metrics`. Pprof needs loopback plus bearer token: `Invoke-WebRequest -Headers @{Authorization='Bearer local-benchmark-token'} http://127.0.0.1:8080/debug/pprof/heap?debug=1`. Current global/IP (200/minute) and IP/room (100/minute) rate limits are multiplied by `RATE_LIMIT_MULTIPLIER`; default `10` supports high traffic. Use `100` only on isolated benchmark servers.
 
 Normal traffic:
 

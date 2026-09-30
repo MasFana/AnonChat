@@ -22,7 +22,7 @@ async function request<T>(path: string, init?: RequestInit, retriedIdentity = fa
   throw error;
 }
 
-const validAnonId = (id: string | null): id is string => !!id && /^anon-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id);
+const validAnonId = (id: string | null): id is string => !!id && /^anon-[a-z0-9]{10}$/.test(id);
 
 export async function anonId() {
   const saved = localStorage.getItem("anonId");
